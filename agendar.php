@@ -3,106 +3,113 @@ $page_title = 'Agendar Envios';
 include 'includes/auth.php';
 verificarLogin();
 
-// Carregar dados
-$bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
-$agendamentos = json_decode(file_get_contents('data/agendamentos.json'), true) ?: [];
-$grupos = json_decode(file_get_contents('data/grupos.json'), true) ?: [];
+$sucesso = '';
+$erro = '';
 
 // Processar formulário
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Debugging: Uncomment the lines below to inspect $_POST and $_FILES arrays
-    /*
-    echo '<pre>';
-    print_r($_POST);
-    print_r($_FILES);
-    echo '</pre>';
-    exit;
-    */
-
-    if (isset($_POST['action'])) {
-        switch ($_POST['action']) {
-            case 'agendar':
-                $plataforma = $_POST['plataforma'];
-                $bot_id = $_POST['bot_id'] ?? null;
-                
-                // Se for WhatsApp, criar um "bot" virtual
-                if ($plataforma == 'whatsapp') {
-                    $bot_id = 'whatsapp'; // Usar um ID genérico para WhatsApp, se não houver um bot específico
-                }
-                
-                $novo_agendamento = [
-                    'id' => time(),
-                    'data_hora' => $_POST['data_hora'],
-                    'bot_id' => $bot_id,
-                    'plataforma' => $plataforma,
-                    'destino' => $_POST['destino'],
-                    'tipo' => $_POST['tipo'],
-                    'mensagem' => $_POST['mensagem'] ?? '', // Default to empty string if not set
-                    'imagem' => null,
-                    'tmdb_id' => $_POST['tmdb_id'] ?? null,
-                    'tipo_tmdb' => $_POST['tipo_tmdb'] ?? null,
-                    'enviado' => false,
-                    'criado_em' => date('Y-m-d H:i:s')
-                ];
-
-                // Processar upload de imagem
-                if ($_POST['tipo'] === 'imagem' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
-                    $upload_dir = 'uploads/';
-                    if (!is_dir($upload_dir)) {
-                        mkdir($upload_dir, 0755, true); // Ensure directory exists with correct permissions
-                    }
-                    $ext = pathinfo($_FILES['imagem']['name'], PATHINFO_EXTENSION);
-                    $nome_arquivo = uniqid() . '.' . $ext;
-                    $caminho_arquivo = $upload_dir . $nome_arquivo;
+    try {
+        if (isset($_POST['action'])) {
+            switch ($_POST['action']) {
+                case 'agendar':
+                    $plataforma = $_POST['plataforma'];
+                    $bot_id = $_POST['bot_id'] ?? null;
+                    $data_hora = $_POST['data_hora'];
+                    $destino = $_POST['destino'];
+                    $tipo = $_POST['tipo'];
+                    $mensagem = $_POST['mensagem'] ?? '';
+                    $tmdb_id = $_POST['tmdb_id'] ?? null;
+                    $tipo_tmdb = $_POST['tipo_tmdb'] ?? null;
                     
-                    if (move_uploaded_file($_FILES['imagem']['tmp_name'], $caminho_arquivo)) {
-                        $novo_agendamento['imagem'] = $caminho_arquivo;
-                    } else {
-                        $erro = "Erro ao fazer upload da imagem. Verifique permissões da pasta 'uploads/'.";
+                    // Se for WhatsApp, bot_id pode ser null
+                    if ($plataforma == 'whatsapp') {
+                        $bot_id = null;
                     }
-                } elseif ($_POST['tipo'] === 'imagem' && (!isset($_FILES['imagem']) || $_FILES['imagem']['error'] !== UPLOAD_ERR_OK)) {
-                    // Specific error if image type is selected but no valid file uploaded
-                    $erro = "Você selecionou 'Imagem com Legenda', mas nenhuma imagem válida foi enviada.";
-                }
-
-
-                if (!isset($erro)) {
-                    $agendamentos[] = $novo_agendamento;
+                    
+                    $image_path = null;
+                    
+                    // Processar upload de imagem
+                    if ($tipo === 'image' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
+                        $upload_dir = 'uploads/';
+                        if (!is_dir($upload_dir)) {
+                            mkdir($upload_dir, 0755, true);
+                        }
+                        $ext = pathinfo($_FILES['imagem']['name'], PATHINFO_EXTENSION);
+                        $nome_arquivo = uniqid() . '.' . $ext;
+                        $caminho_arquivo = $upload_dir . $nome_arquivo;
+                        
+                        if (move_uploaded_file($_FILES['imagem']['tmp_name'], $caminho_arquivo)) {
+                            $image_path = $caminho_arquivo;
+                        } else {
+                            $erro = "Erro ao fazer upload da imagem. Verifique permissões da pasta 'uploads/'.";
+                            break;
+                        }
+                    } elseif ($tipo === 'image' && (!isset($_FILES['imagem']) || $_FILES['imagem']['error'] !== UPLOAD_ERR_OK)) {
+                        $erro = "Você selecionou 'Imagem com Legenda', mas nenhuma imagem válida foi enviada.";
+                        break;
+                    }
+                    
+                    // Inserir agendamento no banco
+                    executeQuery("INSERT INTO scheduled_messages (scheduled_time, bot_id, platform, destination, type, message, image_path, tmdb_id, tmdb_type, sent, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW())", 
+                        [$data_hora, $bot_id, $plataforma, $destino, $tipo, $mensagem, $image_path, $tmdb_id, $tipo_tmdb, $_SESSION['user_id']]);
+                    
                     $sucesso = "Agendamento criado com sucesso!";
-                    file_put_contents('data/agendamentos.json', json_encode($agendamentos, JSON_PRETTY_PRINT));
-                }
-                break;
-                
-            case 'excluir':
-                $agendamentos = array_filter($agendamentos, function($ag) {
-                    return $ag['id'] != $_POST['id'];
-                });
-                $agendamentos = array_values($agendamentos);
-                $sucesso = "Agendamento excluído!";
-                file_put_contents('data/agendamentos.json', json_encode($agendamentos, JSON_PRETTY_PRINT));
-                break;
-
-            case 'atualizar_status':
-                // Simulação de atualização de status
-                foreach ($agendamentos as &$ag) {
-                    if ($ag['id'] == $_POST['id'] && !$ag['enviado'] && strtotime($ag['data_hora']) <= time()) {
-                        $ag['enviado'] = true;
+                    break;
+                    
+                case 'excluir':
+                    $id = (int)$_POST['id'];
+                    
+                    $affected = executeQuery("DELETE FROM scheduled_messages WHERE id = ? AND user_id = ?", [$id, $_SESSION['user_id']])->rowCount();
+                    
+                    if ($affected > 0) {
+                        $sucesso = "Agendamento excluído!";
+                    } else {
+                        $erro = "Agendamento não encontrado ou você não tem permissão para excluí-lo!";
                     }
-                }
-                $sucesso = "Status atualizado!";
-                file_put_contents('data/agendamentos.json', json_encode($agendamentos, JSON_PRETTY_PRINT));
-                break;
+                    break;
 
-            case 'limpar_concluidos':
-                $agendamentos = array_filter($agendamentos, function($ag) {
-                    return !$ag['enviado'] && strtotime($ag['data_hora']) > time();
-                });
-                $agendamentos = array_values($agendamentos);
-                $sucesso = "Agendamentos concluídos ou expirados foram removidos!";
-                file_put_contents('data/agendamentos.json', json_encode($agendamentos, JSON_PRETTY_PRINT));
-                break;
+                case 'atualizar_status':
+                    $id = (int)$_POST['id'];
+                    
+                    $affected = executeQuery("UPDATE scheduled_messages SET sent = 1, processed_at = NOW() WHERE id = ? AND user_id = ? AND sent = 0 AND scheduled_time <= NOW()", 
+                        [$id, $_SESSION['user_id']])->rowCount();
+                    
+                    if ($affected > 0) {
+                        $sucesso = "Status atualizado!";
+                    } else {
+                        $erro = "Não foi possível atualizar o status do agendamento!";
+                    }
+                    break;
+
+                case 'limpar_concluidos':
+                    $affected = executeQuery("DELETE FROM scheduled_messages WHERE user_id = ? AND (sent = 1 OR scheduled_time < NOW())", 
+                        [$_SESSION['user_id']])->rowCount();
+                    
+                    $sucesso = "Agendamentos concluídos ou expirados foram removidos! ($affected registros)";
+                    break;
+            }
         }
+    } catch (Exception $e) {
+        error_log("Agendar error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
+}
+
+// Carregar dados do banco
+try {
+    $bots = fetchAll("SELECT * FROM bots WHERE active = 1 AND (user_id = ? OR user_id IS NULL)", [$_SESSION['user_id']]);
+    $agendamentos = fetchAll("SELECT * FROM scheduled_messages WHERE user_id = ? ORDER BY created_at DESC", [$_SESSION['user_id']]);
+    $grupos = fetchAll("SELECT * FROM groups WHERE user_id = ?", [$_SESSION['user_id']]);
+    
+    // Buscar chave TMDB
+    $tmdb_config = fetchOne("SELECT config_value FROM system_config WHERE config_key = 'tmdb_api_key'");
+    $tmdb_key = $tmdb_config['config_value'] ?? '';
+} catch (Exception $e) {
+    error_log("Agendar load error: " . $e->getMessage());
+    $bots = [];
+    $agendamentos = [];
+    $grupos = [];
+    $tmdb_key = '';
 }
 
 // Se veio do TMDB
@@ -110,23 +117,19 @@ $tmdb_id = $_GET['tmdb_id'] ?? '';
 $tipo_tmdb = $_GET['tipo'] ?? '';
 $titulo_tmdb = $_GET['titulo'] ?? '';
 
-// Filtrar grupos do usuário logado
-$meus_grupos = array_filter($grupos, function($grupo) {
-    return isset($grupo['user_id']) && $grupo['user_id'] === $_SESSION['user_id'];
-});
-
 include 'includes/header.php';
 ?>
 
-<?php if (isset($sucesso)): ?>
+<?php if (!empty($sucesso)): ?>
 <div class="alert alert-success alert-dismissible fade show" role="alert">
-    <?= $sucesso ?>
+    <?= htmlspecialchars($sucesso) ?>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 <?php endif; ?>
-<?php if (isset($erro)): ?>
+
+<?php if (!empty($erro)): ?>
 <div class="alert alert-danger alert-dismissible fade show" role="alert">
-    <?= $erro ?>
+    <?= htmlspecialchars($erro) ?>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 <?php endif; ?>
@@ -143,8 +146,8 @@ include 'includes/header.php';
             <input type="hidden" name="action" value="agendar">
             <input type="hidden" name="plataforma" id="hiddenPlataforma">
             <?php if ($tmdb_id): ?>
-            <input type="hidden" name="tmdb_id" value="<?= $tmdb_id ?>">
-            <input type="hidden" name="tipo_tmdb" value="<?= $tipo_tmdb ?>">
+            <input type="hidden" name="tmdb_id" value="<?= htmlspecialchars($tmdb_id) ?>">
+            <input type="hidden" name="tipo_tmdb" value="<?= htmlspecialchars($tipo_tmdb) ?>">
             <div class="alert alert-info">
                 <strong>Conteúdo TMDB selecionado:</strong> <?= htmlspecialchars($titulo_tmdb) ?>
                 <br><small>A mensagem será gerada automaticamente com base nos dados do TMDB</small>
@@ -171,9 +174,9 @@ include 'includes/header.php';
                 <select name="bot_id" class="form-select">
                     <option value="">Escolha um bot...</option>
                     <?php foreach ($bots as $bot): ?>
-                        <?php if ($bot['ativo'] && $bot['tipo'] == 'telegram'): ?>
-                        <option value="<?= htmlspecialchars($bot['id']) ?>">
-                            <?= htmlspecialchars($bot['nome']) ?> (<?= ucfirst($bot['tipo']) ?>)
+                        <?php if ($bot['active'] && $bot['type'] == 'telegram'): ?>
+                        <option value="<?= $bot['id'] ?>">
+                            <?= htmlspecialchars($bot['name']) ?> (<?= ucfirst($bot['type']) ?>)
                         </option>
                         <?php endif; ?>
                     <?php endforeach; ?>
@@ -197,8 +200,8 @@ include 'includes/header.php';
                     <option value="tmdb">Conteúdo TMDB</option>
                     <?php else: ?>
                     <option value="">Selecione...</option>
-                    <option value="texto">Texto</option>
-                    
+                    <option value="text">Texto</option>
+                    <option value="image">Imagem com Legenda</option>
                     <?php endif; ?>
                 </select>
             </div>
@@ -261,36 +264,38 @@ include 'includes/header.php';
                 <tbody>
                     <?php foreach (array_reverse($agendamentos) as $ag): ?>
                     <?php
-                        $bot_nome = $ag['plataforma'] == 'whatsapp' ? 'WhatsApp' : 'Bot não encontrado';
-                        foreach ($bots as $bot) {
-                            if ($bot['id'] == $ag['bot_id']) {
-                                $bot_nome = $bot['nome'];
-                                break;
+                        $bot_nome = $ag['platform'] == 'whatsapp' ? 'WhatsApp' : 'Bot não encontrado';
+                        if ($ag['bot_id']) {
+                            foreach ($bots as $bot) {
+                                if ($bot['id'] == $ag['bot_id']) {
+                                    $bot_nome = $bot['name'];
+                                    break;
+                                }
                             }
                         }
                         
                         $status_class = 'badge-warning';
                         $status_text = '⏳ Pendente';
-                        if ($ag['enviado']) {
+                        if ($ag['sent']) {
                             $status_class = 'badge-success';
                             $status_text = '✅ Enviado';
-                        } elseif (strtotime($ag['data_hora']) < time()) {
+                        } elseif (strtotime($ag['scheduled_time']) < time()) {
                             $status_class = 'badge-danger';
                             $status_text = '❌ Expirado';
                         }
                     ?>
                     <tr>
-                        <td><?= date('d/m/Y H:i', strtotime($ag['data_hora'])) ?></td>
+                        <td><?= date('d/m/Y H:i', strtotime($ag['scheduled_time'])) ?></td>
                         <td><?= htmlspecialchars($bot_nome) ?></td>
-                        <td><?= htmlspecialchars(substr($ag['destino'], 0, 20)) ?>...</td>
-                        <td><?= ucfirst($ag['tipo']) ?></td>
+                        <td><?= htmlspecialchars(substr($ag['destination'], 0, 20)) ?>...</td>
+                        <td><?= ucfirst($ag['type']) ?></td>
                         <td>
                             <span class="badge <?= $status_class ?>">
                                 <?= $status_text ?>
                             </span>
                         </td>
                         <td>
-                            <?php if (!$ag['enviado'] && strtotime($ag['data_hora']) > time()): ?>
+                            <?php if (!$ag['sent'] && strtotime($ag['scheduled_time']) > time()): ?>
                             <form method="POST" style="display: inline;" onsubmit="return confirm('Tem certeza que deseja excluir este agendamento?')">
                                 <input type="hidden" name="action" value="excluir">
                                 <input type="hidden" name="id" value="<?= $ag['id'] ?>">
@@ -333,35 +338,35 @@ include 'includes/header.php';
 function verDetalhes(agendamento) {
     let conteudo = `
         <div style="margin-bottom: 1rem;">
-            <strong>Data/Hora:</strong> ${new Date(agendamento.data_hora).toLocaleString('pt-BR')}
+            <strong>Data/Hora:</strong> ${new Date(agendamento.scheduled_time).toLocaleString('pt-BR')}
         </div>
         <div style="margin-bottom: 1rem;">
-            <strong>Plataforma:</strong> ${agendamento.plataforma ? agendamento.plataforma.charAt(0).toUpperCase() + agendamento.plataforma.slice(1) : 'N/A'}
+            <strong>Plataforma:</strong> ${agendamento.platform ? agendamento.platform.charAt(0).toUpperCase() + agendamento.platform.slice(1) : 'N/A'}
         </div>
         <div style="margin-bottom: 1rem;">
             <strong>Bot ID:</strong> ${agendamento.bot_id || 'N/A'}
         </div>
         <div style="margin-bottom: 1rem;">
-            <strong>Destino:</strong> ${agendamento.destino}
+            <strong>Destino:</strong> ${agendamento.destination}
         </div>
         <div style="margin-bottom: 1rem;">
-            <strong>Tipo:</strong> ${agendamento.tipo.charAt(0).toUpperCase() + agendamento.tipo.slice(1)}
+            <strong>Tipo:</strong> ${agendamento.type.charAt(0).toUpperCase() + agendamento.type.slice(1)}
         </div>
         <div style="margin-bottom: 1rem;">
             <strong>Mensagem:</strong>
-            <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px; margin-top: 0.5rem; white-space: pre-wrap;">${agendamento.mensagem || '[Nenhuma mensagem]'}</div>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px; margin-top: 0.5rem; white-space: pre-wrap;">${agendamento.message || '[Nenhuma mensagem]'}</div>
         </div>
-        ${agendamento.imagem ? `
+        ${agendamento.image_path ? `
         <div style="margin-bottom: 1rem;">
             <strong>Imagem:</strong>
-            <div><img src="${agendamento.imagem}" style="max-width: 200px; max-height: 200px; object-fit: cover;"></div>
+            <div><img src="${agendamento.image_path}" style="max-width: 200px; max-height: 200px; object-fit: cover;"></div>
         </div>` : ''}
         ${agendamento.tmdb_id ? `
         <div style="margin-bottom: 1rem;">
-            <strong>TMDB ID:</strong> ${agendamento.tmdb_id} (${agendamento.tipo_tmdb})
+            <strong>TMDB ID:</strong> ${agendamento.tmdb_id} (${agendamento.tmdb_type})
         </div>` : ''}
         <div style="margin-bottom: 1rem;">
-            <strong>Criado em:</strong> ${new Date(agendamento.criado_em).toLocaleString('pt-BR')}
+            <strong>Criado em:</strong> ${new Date(agendamento.created_at).toLocaleString('pt-BR')}
         </div>
     `;
     
@@ -387,18 +392,18 @@ function toggleBotAgendamento() {
         grupoBotAgendamento.style.display = 'block';
         grupoBotAgendamento.querySelector('select').required = true;
         destinoHelp.innerHTML = '<strong>Telegram:</strong> Selecione um grupo cadastrado';
-        <?php foreach ($meus_grupos as $grupo): ?>
-            <?php if ($grupo['tipo'] === 'telegram'): ?>
-                destinoSelect.innerHTML += `<option value="<?= htmlspecialchars($grupo['id_externo']) ?>"><?= htmlspecialchars($grupo['nome']) ?> (<?= htmlspecialchars($grupo['id_externo']) ?>)</option>`;
+        <?php foreach ($grupos as $grupo): ?>
+            <?php if ($grupo['type'] === 'telegram'): ?>
+                destinoSelect.innerHTML += `<option value="<?= htmlspecialchars($grupo['external_id']) ?>"><?= htmlspecialchars($grupo['name']) ?> (<?= htmlspecialchars($grupo['external_id']) ?>)</option>`;
             <?php endif; ?>
         <?php endforeach; ?>
     } else if (plataforma === 'whatsapp') {
         grupoBotAgendamento.style.display = 'none';
         grupoBotAgendamento.querySelector('select').required = false;
         destinoHelp.innerHTML = '<strong>WhatsApp:</strong> Selecione um grupo cadastrado';
-        <?php foreach ($meus_grupos as $grupo): ?>
-            <?php if ($grupo['tipo'] === 'whatsapp'): ?>
-                destinoSelect.innerHTML += `<option value="<?= htmlspecialchars($grupo['id_externo']) ?>"><?= htmlspecialchars($grupo['nome']) ?> (<?= htmlspecialchars($grupo['id_externo']) ?>)</option>`;
+        <?php foreach ($grupos as $grupo): ?>
+            <?php if ($grupo['type'] === 'whatsapp'): ?>
+                destinoSelect.innerHTML += `<option value="<?= htmlspecialchars($grupo['external_id']) ?>"><?= htmlspecialchars($grupo['name']) ?> (<?= htmlspecialchars($grupo['external_id']) ?>)</option>`;
             <?php endif; ?>
         <?php endforeach; ?>
     } else {
@@ -416,56 +421,57 @@ function toggleFieldsBasedOnType() {
     const imagemInput = document.getElementById('imagemInput');
 
     // Reset required states
-    mensagemInput.required = false;
-    imagemInput.required = false;
-    mensagemField.style.display = 'block'; // Show message field by default
-    imagemField.style.display = 'none'; // Hide image field by default
+    if (mensagemInput) mensagemInput.required = false;
+    if (imagemInput) imagemInput.required = false;
+    if (mensagemField) mensagemField.style.display = 'block';
+    if (imagemField) imagemField.style.display = 'none';
 
     // Determine visibility and required status based on type
-    if (tipo === 'texto') {
-        mensagemInput.required = true;
-    } else if (tipo === 'imagem') {
-        imagemField.style.display = 'block';
-        imagemInput.required = true;
-        // Message is optional for image with caption
+    if (tipo === 'text') {
+        if (mensagemInput) mensagemInput.required = true;
+    } else if (tipo === 'image') {
+        if (imagemField) imagemField.style.display = 'block';
+        if (imagemInput) imagemInput.required = true;
     } else if (tipo === 'tmdb') {
-        mensagemField.style.display = 'none'; // Message is hidden/auto-generated for TMDB
+        if (mensagemField) mensagemField.style.display = 'none';
     } else {
-        // If no type or an invalid type is selected, make message required but image not
-        mensagemInput.required = true;
+        if (mensagemInput) mensagemInput.required = true;
     }
     
     // Ensure preview is hidden if type changes away from image
-    if (tipo !== 'imagem') {
-        document.getElementById('imagemPreview').style.display = 'none';
-        document.getElementById('previewImg').src = '';
+    if (tipo !== 'image') {
+        const imagemPreview = document.getElementById('imagemPreview');
+        const previewImg = document.getElementById('previewImg');
+        if (imagemPreview) imagemPreview.style.display = 'none';
+        if (previewImg) previewImg.src = '';
     }
 }
-
 
 document.addEventListener('DOMContentLoaded', function() {
     const imagemInput = document.getElementById('imagemInput');
     const imagemPreview = document.getElementById('imagemPreview');
     const previewImg = document.getElementById('previewImg');
 
-    imagemInput.addEventListener('change', function() {
-        const file = this.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                previewImg.src = e.target.result;
-                imagemPreview.style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        } else {
-            imagemPreview.style.display = 'none';
-            previewImg.src = ''; // Clear preview if no file
-        }
-    });
+    if (imagemInput && imagemPreview && previewImg) {
+        imagemInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    imagemPreview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                imagemPreview.style.display = 'none';
+                previewImg.src = '';
+            }
+        });
+    }
 
-    // Initial call to set correct field states on page load (e.g., if coming from TMDB)
+    // Initial call to set correct field states on page load
     toggleFieldsBasedOnType();
-    toggleBotAgendamento(); // Also call this to populate destination dropdown on load
+    toggleBotAgendamento();
 });
 </script>
 
