@@ -1,129 +1,82 @@
 <?php
 $page_title = 'Meus Dados e Grupos';
 include 'includes/auth.php';
-verificarLogin(); // Garante que o usuário esteja logado
+verificarLogin();
 
 $sucesso = '';
 $erro = '';
 
-// Caminho para o arquivo de grupos
-$grupos_file = 'data/grupos.json';
-
-// Carregar grupos existentes
-$grupos = [];
-if (file_exists($grupos_file)) {
-    $grupos = json_decode(file_get_contents($grupos_file), true);
-    if (!is_array($grupos)) {
-        $grupos = []; // Garante que $grupos seja um array mesmo se o JSON estiver corrompido
-    }
-}
-
 // Processar formulário de grupos
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['action'])) {
-        switch ($_POST['action']) {
-            case 'add_grupo':
-                $nome_grupo = trim($_POST['nome_grupo'] ?? '');
-                $id_grupo = trim($_POST['id_grupo'] ?? '');
-                $tipo_grupo = $_POST['tipo_grupo'] ?? '';
+    try {
+        if (isset($_POST['action'])) {
+            switch ($_POST['action']) {
+                case 'add_grupo':
+                    $nome_grupo = trim($_POST['nome_grupo'] ?? '');
+                    $id_grupo = trim($_POST['id_grupo'] ?? '');
+                    $tipo_grupo = $_POST['tipo_grupo'] ?? '';
 
-                if (empty($nome_grupo) || empty($id_grupo) || empty($tipo_grupo)) {
-                    $erro = "Todos os campos do grupo são obrigatórios.";
-                } elseif (!in_array($tipo_grupo, ['whatsapp', 'telegram'])) {
-                    $erro = "Tipo de grupo inválido.";
-                } else {
-                    $novo_grupo = [
-                        'id' => uniqid(), // Gera um ID único para o grupo
-                        'nome' => $nome_grupo,
-                        'id_externo' => $id_grupo,
-                        'tipo' => $tipo_grupo,
-                        'user_id' => $_SESSION['user_id'] // Associa o grupo ao usuário logado
-                    ];
-                    $grupos[] = $novo_grupo;
-                    if (file_put_contents($grupos_file, json_encode($grupos, JSON_PRETTY_PRINT))) {
-                        $sucesso = "Grupo adicionado com sucesso!";
+                    if (empty($nome_grupo) || empty($id_grupo) || empty($tipo_grupo)) {
+                        $erro = "Todos os campos do grupo são obrigatórios.";
+                    } elseif (!in_array($tipo_grupo, ['whatsapp', 'telegram'])) {
+                        $erro = "Tipo de grupo inválido.";
                     } else {
-                        $erro = "Erro ao salvar o grupo.";
+                        executeQuery("INSERT INTO groups (name, external_id, type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())", 
+                            [$nome_grupo, $id_grupo, $tipo_grupo, $_SESSION['user_id']]);
+                        $sucesso = "Grupo adicionado com sucesso!";
                     }
-                }
-                break;
+                    break;
 
-            case 'edit_grupo':
-                $grupo_id = $_POST['grupo_id'] ?? '';
-                $nome_grupo = trim($_POST['nome_grupo'] ?? '');
-                $id_grupo = trim($_POST['id_grupo'] ?? '');
-                $tipo_grupo = $_POST['tipo_grupo'] ?? '';
+                case 'edit_grupo':
+                    $grupo_id = (int)$_POST['grupo_id'];
+                    $nome_grupo = trim($_POST['nome_grupo'] ?? '');
+                    $id_grupo = trim($_POST['id_grupo'] ?? '');
+                    $tipo_grupo = $_POST['tipo_grupo'] ?? '';
 
-                $found = false;
-                foreach ($grupos as &$grupo) {
-                    if ($grupo['id'] === $grupo_id && $grupo['user_id'] === $_SESSION['user_id']) {
-                        if (empty($nome_grupo) || empty($id_grupo) || empty($tipo_grupo)) {
-                            $erro = "Todos os campos do grupo são obrigatórios.";
-                        } elseif (!in_array($tipo_grupo, ['whatsapp', 'telegram'])) {
-                            $erro = "Tipo de grupo inválido.";
+                    if (empty($nome_grupo) || empty($id_grupo) || empty($tipo_grupo)) {
+                        $erro = "Todos os campos do grupo são obrigatórios.";
+                    } elseif (!in_array($tipo_grupo, ['whatsapp', 'telegram'])) {
+                        $erro = "Tipo de grupo inválido.";
+                    } else {
+                        $affected = executeQuery("UPDATE groups SET name = ?, external_id = ?, type = ?, updated_at = NOW() WHERE id = ? AND user_id = ?", 
+                            [$nome_grupo, $id_grupo, $tipo_grupo, $grupo_id, $_SESSION['user_id']])->rowCount();
+                        
+                        if ($affected > 0) {
+                            $sucesso = "Grupo atualizado com sucesso!";
                         } else {
-                            $grupo['nome'] = $nome_grupo;
-                            $grupo['id_externo'] = $id_grupo;
-                            $grupo['tipo'] = $tipo_grupo;
-                            $found = true;
-                            break;
+                            $erro = "Grupo não encontrado ou você não tem permissão para editá-lo.";
                         }
                     }
-                }
+                    break;
 
-                if ($found) {
-                    if (file_put_contents($grupos_file, json_encode($grupos, JSON_PRETTY_PRINT))) {
-                        $sucesso = "Grupo atualizado com sucesso!";
-                    } else {
-                        $erro = "Erro ao atualizar o grupo.";
-                    }
-                } elseif (empty($erro)) {
-                    $erro = "Grupo não encontrado ou você não tem permissão para editá-lo.";
-                }
-                break;
-
-            case 'delete_grupo':
-                $grupo_id = $_POST['grupo_id'] ?? '';
-                $grupos_filtrados = [];
-                $found = false;
-                foreach ($grupos as $grupo) {
-                    if ($grupo['id'] === $grupo_id && $grupo['user_id'] === $_SESSION['user_id']) {
-                        $found = true;
-                    } else {
-                        $grupos_filtrados[] = $grupo;
-                    }
-                }
-
-                if ($found) {
-                    if (file_put_contents($grupos_file, json_encode($grupos_filtrados, JSON_PRETTY_PRINT))) {
-                        $grupos = $grupos_filtrados; // Atualiza a variável $grupos para a exibição
+                case 'delete_grupo':
+                    $grupo_id = (int)$_POST['grupo_id'];
+                    
+                    $affected = executeQuery("DELETE FROM groups WHERE id = ? AND user_id = ?", [$grupo_id, $_SESSION['user_id']])->rowCount();
+                    
+                    if ($affected > 0) {
                         $sucesso = "Grupo excluído com sucesso!";
                     } else {
-                        $erro = "Erro ao excluir o grupo.";
+                        $erro = "Grupo não encontrado ou você não tem permissão para excluí-lo.";
                     }
-                } else {
-                    $erro = "Grupo não encontrado ou você não tem permissão para excluí-lo.";
-                }
-                break;
+                    break;
+            }
         }
+    } catch (Exception $e) {
+        error_log("Meus dados error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
 }
 
-// Carregar dados do usuário logado (assumindo que $_SESSION['user_id'] está definido por auth.php)
-$usuarios = json_decode(file_get_contents('data/usuarios.json'), true);
-$usuario_atual = null;
-foreach ($usuarios as $user) {
-    if ($user['id'] == $_SESSION['user_id']) {
-        $usuario_atual = $user;
-        break;
-    }
+// Carregar dados do usuário logado
+try {
+    $usuario_atual = fetchOne("SELECT * FROM users WHERE id = ?", [$_SESSION['user_id']]);
+    $meus_grupos = fetchAll("SELECT * FROM groups WHERE user_id = ? ORDER BY created_at DESC", [$_SESSION['user_id']]);
+} catch (Exception $e) {
+    error_log("Meus dados load error: " . $e->getMessage());
+    $usuario_atual = ['name' => 'Usuário', 'email' => '', 'last_login' => null];
+    $meus_grupos = [];
 }
-
-// Filtrar grupos para mostrar apenas os do usuário logado
-$meus_grupos = array_filter($grupos, function($grupo) {
-    return isset($grupo['user_id']) && $grupo['user_id'] === $_SESSION['user_id'];
-});
-
 
 include 'includes/header.php';
 ?>
@@ -131,14 +84,14 @@ include 'includes/header.php';
 <div class="container mt-4">
     <?php if ($sucesso): ?>
     <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= $sucesso ?>
+        <?= htmlspecialchars($sucesso) ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
     <?php endif; ?>
 
     <?php if ($erro): ?>
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= $erro ?>
+        <?= htmlspecialchars($erro) ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
     <?php endif; ?>
@@ -153,9 +106,9 @@ include 'includes/header.php';
                     </h3>
                 </div>
                 <div class="card-body">
-                    <p><strong>Nome:</strong> <?= htmlspecialchars($usuario_atual['nome'] ?? 'N/A') ?></p>
+                    <p><strong>Nome:</strong> <?= htmlspecialchars($usuario_atual['name'] ?? 'N/A') ?></p>
                     <p><strong>Email:</strong> <?= htmlspecialchars($usuario_atual['email'] ?? 'N/A') ?></p>
-                    <p><strong>Último Login:</strong> <?= date('d/m/Y H:i:s', strtotime($usuario_atual['ultimo_login'] ?? 'now')) ?></p>
+                    <p><strong>Último Login:</strong> <?= $usuario_atual['last_login'] ? date('d/m/Y H:i:s', strtotime($usuario_atual['last_login'])) : 'Nunca' ?></p>
                 </div>
             </div>
         </div>
@@ -220,34 +173,34 @@ include 'includes/header.php';
                                 <tbody>
                                     <?php foreach ($meus_grupos as $grupo): ?>
                                         <tr>
-                                            <td><?= htmlspecialchars($grupo['nome']) ?></td>
-                                            <td class="grupo-id-cell"><?= htmlspecialchars($grupo['id_externo']) ?></td>
+                                            <td><?= htmlspecialchars($grupo['name']) ?></td>
+                                            <td class="grupo-id-cell"><?= htmlspecialchars($grupo['external_id']) ?></td>
                                             <td>
                                                 <?php
-                                                if ($grupo['tipo'] === 'whatsapp') {
+                                                if ($grupo['type'] === 'whatsapp') {
                                                     echo '<i class="bi bi-whatsapp text-success"></i> WhatsApp';
-                                                } elseif ($grupo['tipo'] === 'telegram') {
+                                                } elseif ($grupo['type'] === 'telegram') {
                                                     echo '<i class="bi bi-telegram text-info"></i> Telegram';
                                                 } else {
-                                                    echo htmlspecialchars($grupo['tipo']);
+                                                    echo htmlspecialchars($grupo['type']);
                                                 }
                                                 ?>
                                             </td>
                                             <td>
-                                                <button class="btn btn-sm btn-outline-primary copy-btn" data-id="<?= htmlspecialchars($grupo['id_externo']) ?>" title="Copiar ID">
+                                                <button class="btn btn-sm btn-outline-primary copy-btn" data-id="<?= htmlspecialchars($grupo['external_id']) ?>" title="Copiar ID">
                                                     <i class="bi bi-clipboard"></i>
                                                 </button>
                                                 <button class="btn btn-sm btn-outline-info edit-btn"
-                                                        data-id="<?= htmlspecialchars($grupo['id']) ?>"
-                                                        data-nome="<?= htmlspecialchars($grupo['nome']) ?>"
-                                                        data-id-externo="<?= htmlspecialchars($grupo['id_externo']) ?>"
-                                                        data-tipo="<?= htmlspecialchars($grupo['tipo']) ?>"
+                                                        data-id="<?= $grupo['id'] ?>"
+                                                        data-nome="<?= htmlspecialchars($grupo['name']) ?>"
+                                                        data-id-externo="<?= htmlspecialchars($grupo['external_id']) ?>"
+                                                        data-tipo="<?= htmlspecialchars($grupo['type']) ?>"
                                                         title="Editar">
                                                     <i class="bi bi-pencil"></i>
                                                 </button>
                                                 <form method="POST" style="display:inline-block;" onsubmit="return confirm('Tem certeza que deseja excluir este grupo?');">
                                                     <input type="hidden" name="action" value="delete_grupo">
-                                                    <input type="hidden" name="grupo_id" value="<?= htmlspecialchars($grupo['id']) ?>">
+                                                    <input type="hidden" name="grupo_id" value="<?= $grupo['id'] ?>">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir">
                                                         <i class="bi bi-trash"></i>
                                                     </button>
@@ -306,7 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Função para cancelar edição
     document.getElementById('btnCancelarEdicao').addEventListener('click', function() {
-        document.getElementById('formGrupo').reset(); // Limpa o formulário
+        document.getElementById('formGrupo').reset();
         document.getElementById('grupoAction').value = 'add_grupo';
         document.getElementById('grupoId').value = '';
         document.getElementById('btnSalvarGrupo').innerHTML = '<i class="bi bi-plus-circle"></i> Adicionar Grupo';
@@ -317,4 +270,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-<?php include 'includes/footer.php'; // Se você tiver um footer, inclua-o aqui ?>
+<?php include 'includes/footer.php'; ?>

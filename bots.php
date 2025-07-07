@@ -1,72 +1,106 @@
-
 <?php
 $page_title = 'Gerenciar Bots';
 include 'includes/auth.php';
 verificarLogin();
 
+$sucesso = '';
+$erro = '';
+
 // Processar formulário
 if ($_POST) {
-    $bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
-    
-    if (isset($_POST['action'])) {
-        switch ($_POST['action']) {
-            case 'add':
-                $novo_bot = [
-                    'id' => time(),
-                    'nome' => $_POST['nome'],
-                    'tipo' => $_POST['tipo'],
-                    'token' => $_POST['token'],
-                    'chat_id' => $_POST['chat_id'] ?? '',
-                    'ativo' => true,
-                    'criado_em' => date('Y-m-d H:i:s')
-                ];
-                $bots[] = $novo_bot;
-                $sucesso = "Bot adicionado com sucesso!";
-                break;
-                
-            case 'edit':
-                foreach ($bots as &$bot) {
-                    if ($bot['id'] == $_POST['id']) {
-                        $bot['nome'] = $_POST['nome'];
-                        $bot['tipo'] = $_POST['tipo'];
-                        $bot['token'] = $_POST['token'];
-                        $bot['chat_id'] = $_POST['chat_id'] ?? '';
+    try {
+        if (isset($_POST['action'])) {
+            switch ($_POST['action']) {
+                case 'add':
+                    $nome = trim($_POST['nome']);
+                    $tipo = $_POST['tipo'];
+                    $token = trim($_POST['token']);
+                    $chat_id = trim($_POST['chat_id'] ?? '');
+                    
+                    if (empty($nome) || empty($tipo) || empty($token)) {
+                        $erro = "Todos os campos obrigatórios devem ser preenchidos!";
                         break;
                     }
-                }
-                $sucesso = "Bot atualizado com sucesso!";
-                break;
-                
-            case 'toggle':
-                foreach ($bots as &$bot) {
-                    if ($bot['id'] == $_POST['id']) {
-                        $bot['ativo'] = !$bot['ativo'];
+                    
+                    executeQuery("INSERT INTO bots (name, type, token, chat_id, user_id, created_at) VALUES (?, ?, ?, ?, ?, NOW())", 
+                        [$nome, $tipo, $token, $chat_id ?: null, $_SESSION['user_id']]);
+                    
+                    $sucesso = "Bot adicionado com sucesso!";
+                    break;
+                    
+                case 'edit':
+                    $id = (int)$_POST['id'];
+                    $nome = trim($_POST['nome']);
+                    $tipo = $_POST['tipo'];
+                    $token = trim($_POST['token']);
+                    $chat_id = trim($_POST['chat_id'] ?? '');
+                    
+                    if (empty($nome) || empty($tipo) || empty($token)) {
+                        $erro = "Todos os campos obrigatórios devem ser preenchidos!";
                         break;
                     }
-                }
-                $sucesso = "Status do bot alterado!";
-                break;
-                
-            case 'delete':
-                $bots = array_filter($bots, function($bot) {
-                    return $bot['id'] != $_POST['id'];
-                });
-                $bots = array_values($bots);
-                $sucesso = "Bot removido com sucesso!";
-                break;
+                    
+                    $affected = executeQuery("UPDATE bots SET name = ?, type = ?, token = ?, chat_id = ?, updated_at = NOW() WHERE id = ? AND (user_id = ? OR user_id IS NULL)", 
+                        [$nome, $tipo, $token, $chat_id ?: null, $id, $_SESSION['user_id']])->rowCount();
+                    
+                    if ($affected > 0) {
+                        $sucesso = "Bot atualizado com sucesso!";
+                    } else {
+                        $erro = "Bot não encontrado ou você não tem permissão para editá-lo!";
+                    }
+                    break;
+                    
+                case 'toggle':
+                    $id = (int)$_POST['id'];
+                    
+                    $bot = fetchOne("SELECT active FROM bots WHERE id = ? AND (user_id = ? OR user_id IS NULL)", [$id, $_SESSION['user_id']]);
+                    if (!$bot) {
+                        $erro = "Bot não encontrado!";
+                        break;
+                    }
+                    
+                    $new_status = $bot['active'] ? 0 : 1;
+                    executeQuery("UPDATE bots SET active = ?, updated_at = NOW() WHERE id = ?", [$new_status, $id]);
+                    
+                    $sucesso = "Status do bot alterado!";
+                    break;
+                    
+                case 'delete':
+                    $id = (int)$_POST['id'];
+                    
+                    $affected = executeQuery("DELETE FROM bots WHERE id = ? AND (user_id = ? OR user_id IS NULL)", [$id, $_SESSION['user_id']])->rowCount();
+                    
+                    if ($affected > 0) {
+                        $sucesso = "Bot removido com sucesso!";
+                    } else {
+                        $erro = "Bot não encontrado ou você não tem permissão para removê-lo!";
+                    }
+                    break;
+            }
         }
-        
-        file_put_contents('data/bots.json', json_encode($bots, JSON_PRETTY_PRINT));
+    } catch (Exception $e) {
+        error_log("Bots error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
 }
 
-$bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
+// Carregar bots do usuário
+try {
+    $bots = fetchAll("SELECT * FROM bots WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC", [$_SESSION['user_id']]);
+} catch (Exception $e) {
+    error_log("Bots load error: " . $e->getMessage());
+    $bots = [];
+}
 
 include 'includes/header.php';
 ?>
 
-<?php if (isset($sucesso)): ?>
-<div class="alert alert-success"><?= $sucesso ?></div>
+<?php if (!empty($sucesso)): ?>
+<div class="alert alert-success"><?= htmlspecialchars($sucesso) ?></div>
+<?php endif; ?>
+
+<?php if (!empty($erro)): ?>
+<div class="alert alert-danger"><?= htmlspecialchars($erro) ?></div>
 <?php endif; ?>
 
 <div class="card">
@@ -133,23 +167,23 @@ include 'includes/header.php';
                 <tbody>
                     <?php foreach ($bots as $bot): ?>
                     <tr>
-                        <td><?= $bot['nome'] ?></td>
+                        <td><?= htmlspecialchars($bot['name']) ?></td>
                         <td>
-                            <i class="bi bi-<?= $bot['tipo'] == 'telegram' ? 'telegram' : 'whatsapp' ?>"></i>
-                            <?= ucfirst($bot['tipo']) ?>
+                            <i class="bi bi-<?= $bot['type'] == 'telegram' ? 'telegram' : 'whatsapp' ?>"></i>
+                            <?= ucfirst($bot['type']) ?>
                         </td>
                         <td>
-                            <span class="badge <?= $bot['ativo'] ? 'badge-success' : 'badge-danger' ?>">
-                                <?= $bot['ativo'] ? 'Ativo' : 'Inativo' ?>
+                            <span class="badge <?= $bot['active'] ? 'badge-success' : 'badge-danger' ?>">
+                                <?= $bot['active'] ? 'Ativo' : 'Inativo' ?>
                             </span>
                         </td>
-                        <td><?= date('d/m/Y H:i', strtotime($bot['criado_em'])) ?></td>
+                        <td><?= date('d/m/Y H:i', strtotime($bot['created_at'])) ?></td>
                         <td>
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="toggle">
                                 <input type="hidden" name="id" value="<?= $bot['id'] ?>">
-                                <button type="submit" class="btn btn-sm <?= $bot['ativo'] ? 'btn-danger' : 'btn-success' ?>">
-                                    <i class="bi bi-<?= $bot['ativo'] ? 'pause' : 'play' ?>"></i>
+                                <button type="submit" class="btn btn-sm <?= $bot['active'] ? 'btn-danger' : 'btn-success' ?>">
+                                    <i class="bi bi-<?= $bot['active'] ? 'pause' : 'play' ?>"></i>
                                 </button>
                             </form>
                             
@@ -216,8 +250,8 @@ include 'includes/header.php';
 <script>
 function editarBot(bot) {
     document.getElementById('edit_id').value = bot.id;
-    document.getElementById('edit_nome').value = bot.nome;
-    document.getElementById('edit_tipo').value = bot.tipo;
+    document.getElementById('edit_nome').value = bot.name;
+    document.getElementById('edit_tipo').value = bot.type;
     document.getElementById('edit_token').value = bot.token;
     document.getElementById('edit_chat_id').value = bot.chat_id || '';
     document.getElementById('editModal').style.display = 'block';

@@ -1,6 +1,5 @@
-
 <?php
-session_start();
+require_once __DIR__ . '/config.php';
 
 function verificarLogin() {
     if (!isset($_SESSION['user_id'])) {

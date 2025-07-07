@@ -1,50 +1,39 @@
 <?php
 session_start();
+require_once 'includes/config.php';
 
-// Criar diretório data se não existir
-if (!file_exists('data')) {
-    mkdir('data', 0755, true);
-}
-
-// Schema inicial para usuarios.json
-$usuarios_default = [
-    [
-        "id" => 1,
-        "usuario" => "admin",
-        "senha" => password_hash("admin", PASSWORD_DEFAULT),
-        "nome" => "Administrador",
-        "ultimo_login" => "",
-        "tipo" => "admin"
-    ]
-];
-
-// Verificar se arquivo de usuários existe
-if (!file_exists('data/usuarios.json')) {
-    file_put_contents('data/usuarios.json', json_encode($usuarios_default, JSON_PRETTY_PRINT));
-}
+$erro = '';
 
 if ($_POST) {
     $usuario = $_POST['usuario'] ?? '';
     $senha = $_POST['senha'] ?? '';
     
-    $usuarios = json_decode(file_get_contents('data/usuarios.json'), true);
-    
-    foreach ($usuarios as $key => $user) {
-        if ($user['usuario'] === $usuario && password_verify($senha, $user['senha'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['user_name'] = $user['nome'];
-            $_SESSION['user_type'] = $user['tipo'];
+    if (empty($usuario) || empty($senha)) {
+        $erro = "Por favor, preencha todos os campos!";
+    } else {
+        try {
+            // Buscar usuário no banco de dados
+            $user = fetchOne("SELECT * FROM users WHERE username = ?", [$usuario]);
             
-            // Atualizar último login
-            $usuarios[$key]['ultimo_login'] = date('Y-m-d H:i:s');
-            file_put_contents('data/usuarios.json', json_encode($usuarios, JSON_PRETTY_PRINT));
-            
-            header('Location: dashboard.php');
-            exit;
+            if ($user && password_verify($senha, $user['password'])) {
+                // Login bem-sucedido
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_name'] = $user['name'];
+                $_SESSION['user_type'] = $user['type'];
+                
+                // Atualizar último login
+                executeQuery("UPDATE users SET last_login = NOW() WHERE id = ?", [$user['id']]);
+                
+                header('Location: dashboard.php');
+                exit;
+            } else {
+                $erro = "Usuário ou senha inválidos!";
+            }
+        } catch (Exception $e) {
+            error_log("Login error: " . $e->getMessage());
+            $erro = "Erro interno. Tente novamente.";
         }
     }
-    
-    $erro = "Usuário ou senha inválidos!";
 }
 ?>
 
@@ -152,16 +141,16 @@ if ($_POST) {
 <body>
     <div class="container">
         <div class="logo">🤖 BotSystem</div>
-        <div class="subtitle">Painel Administrativo v1.0.0</div>
+        <div class="subtitle">Painel Administrativo v2.0.0</div>
         
-        <?php if (isset($erro)): ?>
-        <div class="alert alert-error"><?= $erro ?></div>
+        <?php if (!empty($erro)): ?>
+        <div class="alert alert-error"><?= htmlspecialchars($erro) ?></div>
         <?php endif; ?>
         
         <form method="POST">
             <div class="form-group">
                 <label for="usuario">Usuário:</label>
-                <input type="text" id="usuario" name="usuario" required value="<?= $_POST['usuario'] ?? '' ?>">
+                <input type="text" id="usuario" name="usuario" required value="<?= htmlspecialchars($_POST['usuario'] ?? '') ?>">
             </div>
             
             <div class="form-group">
@@ -171,8 +160,6 @@ if ($_POST) {
             
             <button type="submit" class="btn">Entrar</button>
         </form>
-        
-        
     </div>
 </body>
 </html>
