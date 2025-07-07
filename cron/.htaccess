@@ -1,0 +1,3 @@
+
+# Proteger diretório cron
+Deny from all

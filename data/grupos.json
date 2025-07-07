@@ -1,0 +1,16 @@
+[
+    {
+        "id": "6865658b7445a",
+        "nome": "PlayTv Entretenimento",
+        "id_externo": "-1002881039384",
+        "tipo": "telegram",
+        "user_id": 1
+    },
+    {
+        "id": "68657e5737b8b",
+        "nome": "PlayTv Entretenimento",
+        "id_externo": "120363403342132905@g.us",
+        "tipo": "whatsapp",
+        "user_id": 1
+    }
+]

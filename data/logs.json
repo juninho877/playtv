@@ -1,0 +1,56 @@
+[
+    {
+        "id": 1751649202,
+        "data_hora": "2025-07-04 14:13:22",
+        "destino": "120363403342132905@g.us",
+        "bot": "WhatsApp Configurado",
+        "tipo": "TMDB - Filme",
+        "mensagem": "Thunderbolts*",
+        "status": "sucesso"
+    },
+    {
+        "id": 1751659602,
+        "data_hora": "2025-07-04 17:06:42",
+        "destino": "120363403342132905@g.us",
+        "bot": "WhatsApp Configurado",
+        "tipo": "TMDB - Filme",
+        "mensagem": "Thunderbolts*",
+        "status": "sucesso"
+    },
+    {
+        "id": 1751659608,
+        "data_hora": "2025-07-04 17:06:48",
+        "destino": "-1002881039384",
+        "bot": "Gestor System",
+        "tipo": "TMDB - Filme",
+        "mensagem": "Thunderbolts*",
+        "status": "sucesso"
+    },
+    {
+        "id": 1751674832,
+        "data_hora": "2025-07-04 21:20:32",
+        "destino": "120363403342132905@g.us",
+        "bot": "WhatsApp Configurado",
+        "tipo": "TMDB - Série",
+        "mensagem": "Coração de Ferro",
+        "status": "sucesso"
+    },
+    {
+        "id": 1751674843,
+        "data_hora": "2025-07-04 21:20:43",
+        "destino": "-1002881039384",
+        "bot": "Gestor System",
+        "tipo": "TMDB - Série",
+        "mensagem": "Coração de Ferro",
+        "status": "sucesso"
+    },
+    {
+        "id": 1751843891,
+        "data_hora": "2025-07-06 20:18:11",
+        "destino": "-1002881039384",
+        "bot": "Gestor System",
+        "tipo": "TMDB - Filme",
+        "mensagem": "Thunderbolts*",
+        "status": "sucesso"
+    }
+]

@@ -1,0 +1,18 @@
+{
+    "bot_enabled": false,
+    "group_responses": false,
+    "show_bot_signature": true,
+    "bot_signature": "\ud83e\udd16 *Resposta Autom\u00e1tica*",
+    "response_delay": 2,
+    "working_hours": {
+        "enabled": false,
+        "start": "08:00",
+        "end": "18:00",
+        "timezone": "America\/Sao_Paulo"
+    },
+    "message_stats": {
+        "total_sent": 0,
+        "today_sent": 0,
+        "last_reset": "2025-07-03"
+    }
+}

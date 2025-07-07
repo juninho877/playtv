@@ -1,0 +1,43 @@
+{
+    "ativo": false,
+    "saudacao": "Olá! 👋 Seja bem-vindo(a)! Como posso ajudá-lo(a) hoje?",
+    "mensagem_padrao": "Desculpe, não entendi sua mensagem. Digite *MENU* para ver as opções disponíveis ou aguarde que em breve um atendente irá lhe responder.",
+    "tempo_inatividade": 300,
+    "estatisticas": {
+        "mensagens_respondidas": 0,
+        "conversas_iniciadas": 0,
+        "palavras_ativadas": 0
+    },
+    "0": {
+        "numero": "556199070892",
+        "primeira_interacao": "2025-07-04 11:45:01",
+        "ultima_interacao": "2025-07-04 21:21:13",
+        "total_mensagens": 28,
+        "saudacao_enviada": true,
+        "nome": "Allan Silva"
+    },
+    "1": {
+        "numero": "558688065921",
+        "nome": "Israel Sousa",
+        "primeira_interacao": "2025-07-04 12:21:32",
+        "ultima_interacao": "2025-07-04 13:58:16",
+        "total_mensagens": 9,
+        "saudacao_enviada": true
+    },
+    "2": {
+        "numero": "5515997432478",
+        "nome": "Michele (Consultora)",
+        "primeira_interacao": "2025-07-04 12:22:13",
+        "ultima_interacao": "2025-07-04 13:08:20",
+        "total_mensagens": 4,
+        "saudacao_enviada": true
+    },
+    "3": {
+        "numero": "5537933008378",
+        "nome": "Littler",
+        "primeira_interacao": "2025-07-04 12:37:27",
+        "ultima_interacao": "2025-07-04 14:05:26",
+        "total_mensagens": 14,
+        "saudacao_enviada": true
+    }
+}

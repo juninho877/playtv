@@ -1,0 +1,10 @@
+[
+    {
+        "id": 1,
+        "nome": "Administrador",
+        "usuario": "admin",
+        "senha": "$2y$10$jffRFLNr827PcFmXeH8tcO6TGWVqDGQpg1GVIZYfgWyDZtN.962CG",
+        "ultimo_login": "2025-07-07 13:06:35",
+        "tipo": "admin"
+    }
+]

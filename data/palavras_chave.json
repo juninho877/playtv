@@ -1,0 +1,28 @@
+[
+    {
+        "id": "1751639526993",
+        "palavra": "Menu",
+        "resposta": "📋 Menu do Bot 🤖\r\n1️⃣ Falar com humano 👨‍💻\r\n2️⃣ Ver promoções 🔥\r\n3️⃣ Horários de atendimento ⏰\r\n4️⃣ Receber uma oração 🙏",
+        "ativo": true,
+        "contador": 7,
+        "criado_em": "2025-07-04 11:32:06",
+        "tempo_resposta": 2
+    },
+    {
+        "id": "1751640430984",
+        "palavra": "haha",
+        "resposta": "*{{nome}}* tudo bem ? {{data}}{{hora}}",
+        "ativo": true,
+        "contador": 4,
+        "criado_em": "2025-07-04 11:47:10"
+    },
+    {
+        "id": "1751641506483",
+        "palavra": "pix",
+        "resposta": " {{pix}}\r\n{{nome_banco}}\r\n{{nome_titular}}\r\n{{valor_promocao}}",
+        "ativo": true,
+        "contador": 5,
+        "tempo_resposta": 3,
+        "criado_em": "2025-07-04 12:05:06"
+    }
+]

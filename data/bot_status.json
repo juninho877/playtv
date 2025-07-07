@@ -1,0 +1,21 @@
+{
+    "enabled": true,
+    "last_activity": null,
+    "updated_at": "2025-07-04 10:46:05",
+    "universal_interval": 1,
+    "last_universal_response": [],
+    "welcome_message_template": "Ola tudo bem {{saudacao}}",
+    "contact_phone": "(XX) XXXXX-XXXX",
+    "auto_greeting": true,
+    "response_delay": 2,
+    "business_hours_enabled": false,
+    "business_hours_start": "08:00",
+    "business_hours_end": "18:00",
+    "business_days": [
+        1,
+        2,
+        3,
+        4,
+        5
+    ]
+}

@@ -1,0 +1,17 @@
+{
+    "ativo": false,
+    "saudacao": "  Olá!  Seja bem-vindo(a)!\r\nComo posso ajudá-lo(a) hoje?\r\n📆 Nosso horário de atendimento:\r\n▪️ Segunda a Sexta: 9h às 21h\r\n▪️ Sábado: 10h às 20h\r\n▪️ Domingo: 10h às 17h\r\n\r\n✨ “O Senhor é meu pastor e nada me faltará.” – Salmo 23:1\r\n\r\n📋 Para mais opções, digite: Menu",
+    "mensagem_padrao": "  Desculpe, não entendi sua mensagem. Digite *MENU* para ver as opções disponíveis ou aguarde que em breve um atendente irá lhe responder.",
+    "tempo_inatividade": 3600,
+    "estatisticas": {
+        "mensagens_respondidas": 50,
+        "conversas_iniciadas": 4,
+        "palavras_ativadas": 3,
+        "pessoas_respondidas": 4
+    },
+    "emoji": "",
+    "mensagem_fora_horario": null,
+    "horario_ativo": false,
+    "horario_inicio": null,
+    "horario_fim": null
+}
