@@ -19,7 +19,7 @@ try {
     
     // Create tables from schema
     echo "Creating database tables...\n";
-    $schema = file_get_contents(__DIR__ . '/schema.sql');
+    $schema = file_get_contents(__DIR__ . '/../supabase/migrations/20250707211614_delicate_paper.sql');
     $pdo->exec($schema);
     echo "✓ Database tables created\n\n";
     

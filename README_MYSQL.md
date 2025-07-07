@@ -82,6 +82,8 @@ $users = fetchAll("SELECT * FROM users WHERE active = 1");
 - `system_config` - Global system settings
 - `dynamic_variables` - User-defined variables
 
+The complete schema is defined in `supabase/migrations/20250707211614_delicate_paper.sql`.
+
 ## Helper Functions Available
 
 The `includes/db.php` file provides several helper functions:
