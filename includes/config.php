@@ -31,4 +31,9 @@ ini_set('session.cookie_secure', isset($_SERVER['HTTPS']));
 
 // Include database connection
 require_once __DIR__ . '/db.php';
+
+// Start session after all ini_set configurations
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 ?>
