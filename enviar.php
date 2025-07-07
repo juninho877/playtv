@@ -3,282 +3,248 @@ $page_title = 'Enviar Mensagens';
 include 'includes/auth.php';
 verificarLogin();
 
-// Carregar dados
-$bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
-$config = json_decode(file_get_contents('data/config.json'), true) ?: [];
-$grupos = json_decode(file_get_contents('data/grupos.json'), true) ?: [];
-
-// Filtrar grupos para o usuário logado
-$meus_grupos = array_filter($grupos, function($grupo) {
-    return isset($grupo['user_id']) && $grupo['user_id'] === $_SESSION['user_id'];
-});
-
-// Debug: Log de configurações
-error_log("Config carregado: " . json_encode($config));
-error_log("Grupos carregados: " . json_encode($meus_grupos));
-
 $sucesso = '';
 $erro = '';
 
 // Processar envio
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] == 'enviar') {
-    $plataforma_envio = $_POST['plataforma_envio'] ?? '';
-    $destino = trim($_POST['destino'] ?? '');
-    $mensagem = $_POST['mensagem'] ?? '';
-    $bot_id = $_POST['bot_id'] ?? '';
-    $tipo_envio = $_POST['tipo_envio'] ?? '';
+    try {
+        $plataforma_envio = $_POST['plataforma_envio'] ?? '';
+        $destino = trim($_POST['destino'] ?? '');
+        $mensagem = $_POST['mensagem'] ?? '';
+        $bot_id = $_POST['bot_id'] ?? '';
+        $tipo_envio = $_POST['tipo_envio'] ?? '';
 
-    // Validar campos obrigatórios
-    if (empty($plataforma_envio) || empty($destino) || empty($mensagem) || empty($tipo_envio)) {
-        $erro = "Todos os campos obrigatórios devem ser preenchidos.";
-    } elseif ($tipo_envio == 'imagem' && (!isset($_FILES['imagem']) || $_FILES['imagem']['error'] != 0)) {
-        $erro = "Uma imagem é obrigatória para envio de imagem.";
-    } elseif ($plataforma_envio == 'whatsapp' && !preg_match('/@c\.us$|@g\.us$/', $destino)) {
-        $erro = "O destino para WhatsApp deve terminar em @c.us (contato) ou @g.us (grupo).";
-    } else {
-        error_log("Dados recebidos - Plataforma: $plataforma_envio, Bot ID: $bot_id, Destino: $destino, Tipo Envio: $tipo_envio");
-
-        $bot_selecionado = null;
-
-        // Configuração para WhatsApp
-        if ($plataforma_envio == 'whatsapp') {
-            if (empty($config['whatsapp']['server']) || empty($config['whatsapp']['instance']) || empty($config['whatsapp']['apikey'])) {
-                $erro = "Configuração do WhatsApp incompleta no 'config.json'. Verifique 'server', 'instance' e 'apikey'.";
-                error_log("Configuração WhatsApp incompleta");
-            } else {
-                // Verificar estado da conexão do WhatsApp
-                $base_url = rtrim($config['whatsapp']['server'], '/');
-                $status_url = $base_url . '/instance/connectionState/' . $config['whatsapp']['instance'];
-                $ch_status = curl_init();
-                curl_setopt($ch_status, CURLOPT_URL, $status_url);
-                curl_setopt($ch_status, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch_status, CURLOPT_TIMEOUT, 10);
-                curl_setopt($ch_status, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch_status, CURLOPT_HTTPHEADER, [
-                    'Content-Type: application/json',
-                    'apikey: ' . $config['whatsapp']['apikey']
-                ]);
-                $status_response = curl_exec($ch_status);
-                $status_code = curl_getinfo($ch_status, CURLINFO_HTTP_CODE);
-                $curl_error = curl_error($ch_status);
-                curl_close($ch_status);
-
-                if ($curl_error) {
-                    $erro = "Erro ao verificar conexão WhatsApp: $curl_error";
-                    error_log("Erro ao verificar conexão WhatsApp: $curl_error");
-                } elseif ($status_code != 200) {
-                    $erro = "Erro ao verificar status do WhatsApp (HTTP $status_code): $status_response";
-                    error_log("Erro ao verificar status WhatsApp: HTTP $status_code, Resposta: $status_response");
-                } else {
-                    $status_data = json_decode($status_response, true);
-                    $connection_state = $status_data['instance']['state'] ?? $status_data['state'] ?? 'unknown';
-                    if ($connection_state !== 'open') {
-                        $erro = "WhatsApp não está conectado. Status: $connection_state";
-                        error_log("WhatsApp não conectado. Status: $connection_state");
-                    } else {
-                        $bot_selecionado = [
-                            'id' => 'whatsapp_config',
-                            'nome' => 'Configuração Padrão WhatsApp',
-                            'tipo' => 'whatsapp',
-                            'ativo' => true,
-                            'token' => null,
-                            'username' => null
-                        ];
-                    }
-                }
-            }
-        } elseif ($plataforma_envio == 'telegram') {
-            foreach ($bots as $bot) {
-                if ($bot['id'] == $bot_id && $bot['ativo'] && $bot['tipo'] == $plataforma_envio) {
-                    $bot_selecionado = $bot;
-                    break;
-                }
-            }
-            if (!$bot_selecionado) {
-                $erro = "Bot Telegram não encontrado, inativo ou não corresponde à plataforma selecionada!";
-                error_log("Bot Telegram não encontrado/inativo/tipo incorreto: $bot_id (Plataforma: $plataforma_envio)");
-            }
+        // Validar campos obrigatórios
+        if (empty($plataforma_envio) || empty($destino) || empty($mensagem) || empty($tipo_envio)) {
+            $erro = "Todos os campos obrigatórios devem ser preenchidos.";
+        } elseif ($tipo_envio == 'imagem' && (!isset($_FILES['imagem']) || $_FILES['imagem']['error'] != 0)) {
+            $erro = "Uma imagem é obrigatória para envio de imagem.";
+        } elseif ($plataforma_envio == 'whatsapp' && !preg_match('/@c\.us$|@g\.us$/', $destino)) {
+            $erro = "O destino para WhatsApp deve terminar em @c.us (contato) ou @g.us (grupo).";
         } else {
-            $erro = "Plataforma de envio inválida.";
-        }
+            $bot_selecionado = null;
+            $bot_name = '';
 
-        if (!$bot_selecionado && empty($erro)) {
-            $erro = "Não foi possível carregar a configuração da plataforma selecionada.";
-        }
-
-        if (empty($erro)) {
-            error_log("Bot selecionado: " . json_encode($bot_selecionado));
-            
-            $sucesso_envio = false;
-            $erro_envio = '';
-            
-            // Log do envio
-            $log_entry = [
-                'id' => time() . rand(100, 999),
-                'data_hora' => date('Y-m-d H:i:s'),
-                'destino' => $destino,
-                'bot' => $bot_selecionado['nome'],
-                'tipo' => $tipo_envio,
-                'mensagem' => substr($mensagem, 0, 100) . (strlen($mensagem) > 100 ? '...' : ''),
-                'status' => 'erro',
-                'plataforma' => $plataforma_envio,
-                'user_id' => $_SESSION['user_id']
-            ];
-            
+            // Configuração para WhatsApp
             if ($plataforma_envio == 'whatsapp') {
-                $base_url = rtrim($config['whatsapp']['server'], '/');
+                $whatsapp_config = fetchAll("SELECT config_key, config_value FROM system_config WHERE config_key IN ('whatsapp_server', 'whatsapp_instance', 'whatsapp_apikey')");
+                $config = [];
+                foreach ($whatsapp_config as $setting) {
+                    $config[$setting['config_key']] = $setting['config_value'];
+                }
                 
-                if ($tipo_envio == 'imagem' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] == 0) {
-                    $upload_dir = 'Uploads/';
-                    if (!file_exists($upload_dir)) {
-                        mkdir($upload_dir, 0755, true);
+                if (empty($config['whatsapp_server']) || empty($config['whatsapp_instance']) || empty($config['whatsapp_apikey'])) {
+                    $erro = "Configuração do WhatsApp incompleta. Verifique as configurações do sistema.";
+                } else {
+                    // Verificar estado da conexão do WhatsApp
+                    $base_url = rtrim($config['whatsapp_server'], '/');
+                    $status_url = $base_url . '/instance/connectionState/' . $config['whatsapp_instance'];
+                    $ch_status = curl_init();
+                    curl_setopt($ch_status, CURLOPT_URL, $status_url);
+                    curl_setopt($ch_status, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch_status, CURLOPT_TIMEOUT, 10);
+                    curl_setopt($ch_status, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch_status, CURLOPT_HTTPHEADER, [
+                        'Content-Type: application/json',
+                        'apikey: ' . $config['whatsapp_apikey']
+                    ]);
+                    $status_response = curl_exec($ch_status);
+                    $status_code = curl_getinfo($ch_status, CURLINFO_HTTP_CODE);
+                    $curl_error = curl_error($ch_status);
+                    curl_close($ch_status);
+
+                    if ($curl_error) {
+                        $erro = "Erro ao verificar conexão WhatsApp: $curl_error";
+                    } elseif ($status_code != 200) {
+                        $erro = "Erro ao verificar status do WhatsApp (HTTP $status_code)";
+                    } else {
+                        $status_data = json_decode($status_response, true);
+                        $connection_state = $status_data['instance']['state'] ?? $status_data['state'] ?? 'unknown';
+                        if ($connection_state !== 'open') {
+                            $erro = "WhatsApp não está conectado. Status: $connection_state";
+                        } else {
+                            $bot_selecionado = [
+                                'id' => 'whatsapp_config',
+                                'name' => 'WhatsApp API',
+                                'type' => 'whatsapp',
+                                'active' => true,
+                                'token' => null
+                            ];
+                            $bot_name = 'WhatsApp API';
+                        }
                     }
+                }
+            } elseif ($plataforma_envio == 'telegram') {
+                $bot_selecionado = fetchOne("SELECT * FROM bots WHERE id = ? AND active = 1 AND type = 'telegram' AND (user_id = ? OR user_id IS NULL)", 
+                    [$bot_id, $_SESSION['user_id']]);
+                
+                if (!$bot_selecionado) {
+                    $erro = "Bot Telegram não encontrado, inativo ou não corresponde à plataforma selecionada!";
+                } else {
+                    $bot_name = $bot_selecionado['name'];
+                }
+            } else {
+                $erro = "Plataforma de envio inválida.";
+            }
+
+            if (!$bot_selecionado && empty($erro)) {
+                $erro = "Não foi possível carregar a configuração da plataforma selecionada.";
+            }
+
+            if (empty($erro)) {
+                $sucesso_envio = false;
+                $erro_envio = '';
+                
+                if ($plataforma_envio == 'whatsapp') {
+                    $base_url = rtrim($config['whatsapp_server'], '/');
                     
-                    $filename = time() . '_' . basename($_FILES['imagem']['name']);
-                    $upload_path = $upload_dir . $filename;
-                    
-                    if (move_uploaded_file($_FILES['imagem']['tmp_name'], $upload_path)) {
-                        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-                        $request_uri = rtrim(dirname($_SERVER['REQUEST_URI']), '/\\');
-                        $full_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . $request_uri . '/' . $upload_path;
+                    if ($tipo_envio == 'imagem' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] == 0) {
+                        $upload_dir = 'uploads/';
+                        if (!file_exists($upload_dir)) {
+                            mkdir($upload_dir, 0755, true);
+                        }
                         
-                        $url = $base_url . '/message/sendMedia/' . $config['whatsapp']['instance'];
+                        $filename = time() . '_' . basename($_FILES['imagem']['name']);
+                        $upload_path = $upload_dir . $filename;
+                        
+                        if (move_uploaded_file($_FILES['imagem']['tmp_name'], $upload_path)) {
+                            $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+                            $request_uri = rtrim(dirname($_SERVER['REQUEST_URI']), '/\\');
+                            $full_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . $request_uri . '/' . $upload_path;
+                            
+                            $url = $base_url . '/message/sendMedia/' . $config['whatsapp_instance'];
+                            $data = [
+                                'number' => $destino,
+                                'mediatype' => 'image',
+                                'media' => $full_url,
+                                'caption' => $mensagem
+                            ];
+                        } else {
+                            $erro_envio = "Erro ao fazer upload da imagem.";
+                        }
+                    } else {
+                        $url = $base_url . '/message/sendText/' . $config['whatsapp_instance'];
                         $data = [
                             'number' => $destino,
-                            'mediatype' => 'image', // Corrigido de 'mediaType' para 'mediatype'
-                            'media' => $full_url,
-                            'caption' => $mensagem
+                            'text' => $mensagem
                         ];
-                    } else {
-                        $erro_envio = "Erro ao fazer upload da imagem: " . $_FILES['imagem']['error'];
-                        error_log("Erro ao fazer upload da imagem: " . $_FILES['imagem']['error']);
                     }
-                } else {
-                    $url = $base_url . '/message/sendText/' . $config['whatsapp']['instance'];
-                    $data = [
-                        'number' => $destino,
-                        'text' => $mensagem
-                    ];
-                }
-                
-                if (!isset($erro_envio) || empty($erro_envio)) {
-                    error_log("Enviando para WhatsApp - URL: $url");
-                    error_log("Dados: " . json_encode($data));
                     
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, $url);
-                    curl_setopt($ch, CURLOPT_POST, true);
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-                    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        'Content-Type: application/json',
-                        'apikey: ' . $config['whatsapp']['apikey']
-                    ]);
-                    
-                    $response = curl_exec($ch);
-                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    $curl_error = curl_error($ch);
-                    curl_close($ch);
-                    
-                    error_log("Resposta WhatsApp - HTTP Code: $httpCode");
-                    error_log("Resposta: $response");
-                    error_log("Erro cURL: $curl_error");
-                    
-                    if ($curl_error) {
-                        $erro_envio = "Erro de conexão WhatsApp: $curl_error";
-                    } elseif ($httpCode == 200 || $httpCode == 201) {
-                        $response_data = json_decode($response, true);
-                        if (isset($response_data['key']['id']) || (isset($response_data['status']) && $response_data['status'] === 'success')) {
-                            $sucesso_envio = true;
-                            $log_entry['status'] = 'sucesso';
-                        } else {
-                            $erro_envio = "Resposta inválida da API WhatsApp: " . ($response_data['message'] ?? $response);
-                            error_log("Resposta inválida: " . json_encode($response_data));
-                        }
-                    } else {
-                        $response_data = json_decode($response, true);
-                        $erro_envio = "Erro HTTP $httpCode da API WhatsApp: " . ($response_data['message'] ?? $response);
-                    }
-                }
-                
-            } elseif ($plataforma_envio == 'telegram') {
-                if (empty($bot_selecionado['token'])) {
-                    $erro_envio = "Token do bot Telegram não configurado.";
-                } else {
-                    if ($tipo_envio == 'imagem' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] == 0) {
-                        $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPhoto";
-                        $post_data = [
-                            'chat_id' => $destino,
-                            'caption' => $mensagem,
-                            'parse_mode' => 'HTML',
-                            'photo' => new CURLFile($_FILES['imagem']['tmp_name'], $_FILES['imagem']['type'], $_FILES['imagem']['name'])
-                        ];
+                    if (!isset($erro_envio) || empty($erro_envio)) {
                         $ch = curl_init();
                         curl_setopt($ch, CURLOPT_URL, $url);
                         curl_setopt($ch, CURLOPT_POST, true);
-                        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+                        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
                         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
                         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                    } else {
-                        $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendMessage";
-                        $post_data = [
-                            'chat_id' => $destino,
-                            'text' => $mensagem,
-                            'parse_mode' => 'HTML'
-                        ];
-                        $ch = curl_init();
-                        curl_setopt($ch, CURLOPT_URL, $url);
-                        curl_setopt($ch, CURLOPT_POST, true);
-                        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
-                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-                        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                            'Content-Type: application/json',
+                            'apikey: ' . $config['whatsapp_apikey']
+                        ]);
+                        
+                        $response = curl_exec($ch);
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $curl_error = curl_error($ch);
+                        curl_close($ch);
+                        
+                        if ($curl_error) {
+                            $erro_envio = "Erro de conexão WhatsApp: $curl_error";
+                        } elseif ($httpCode == 200 || $httpCode == 201) {
+                            $response_data = json_decode($response, true);
+                            if (isset($response_data['key']['id']) || (isset($response_data['status']) && $response_data['status'] === 'success')) {
+                                $sucesso_envio = true;
+                            } else {
+                                $erro_envio = "Resposta inválida da API WhatsApp: " . ($response_data['message'] ?? $response);
+                            }
+                        } else {
+                            $response_data = json_decode($response, true);
+                            $erro_envio = "Erro HTTP $httpCode da API WhatsApp: " . ($response_data['message'] ?? $response);
+                        }
                     }
                     
-                    error_log("Enviando para Telegram - URL: $url");
-                    error_log("Dados: " . json_encode($post_data));
-                    
-                    $response = curl_exec($ch);
-                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    $curl_error = curl_error($ch);
-                    curl_close($ch);
-                    
-                    error_log("Resposta Telegram - HTTP Code: $httpCode");
-                    error_log("Resposta: $response");
-                    error_log("Erro cURL: $curl_error");
-                    
-                    if ($curl_error) {
-                        $erro_envio = "Erro de conexão Telegram: $curl_error";
-                    } elseif ($httpCode == 200) {
-                        $response_data = json_decode($response, true);
-                        if (isset($response_data['ok']) && $response_data['ok'] === true) {
-                            $sucesso_envio = true;
-                            $log_entry['status'] = 'sucesso';
-                        } else {
-                            $erro_envio = "Erro Telegram: " . ($response_data['description'] ?? 'Erro desconhecido - ' . $response);
-                        }
+                } elseif ($plataforma_envio == 'telegram') {
+                    if (empty($bot_selecionado['token'])) {
+                        $erro_envio = "Token do bot Telegram não configurado.";
                     } else {
-                        $erro_envio = "Erro HTTP Telegram $httpCode: $response";
+                        if ($tipo_envio == 'imagem' && isset($_FILES['imagem']) && $_FILES['imagem']['error'] == 0) {
+                            $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPhoto";
+                            $post_data = [
+                                'chat_id' => $destino,
+                                'caption' => $mensagem,
+                                'parse_mode' => 'HTML',
+                                'photo' => new CURLFile($_FILES['imagem']['tmp_name'], $_FILES['imagem']['type'], $_FILES['imagem']['name'])
+                            ];
+                            $ch = curl_init();
+                            curl_setopt($ch, CURLOPT_URL, $url);
+                            curl_setopt($ch, CURLOPT_POST, true);
+                            curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                        } else {
+                            $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendMessage";
+                            $post_data = [
+                                'chat_id' => $destino,
+                                'text' => $mensagem,
+                                'parse_mode' => 'HTML'
+                            ];
+                            $ch = curl_init();
+                            curl_setopt($ch, CURLOPT_URL, $url);
+                            curl_setopt($ch, CURLOPT_POST, true);
+                            curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                        }
+                        
+                        $response = curl_exec($ch);
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $curl_error = curl_error($ch);
+                        curl_close($ch);
+                        
+                        if ($curl_error) {
+                            $erro_envio = "Erro de conexão Telegram: $curl_error";
+                        } elseif ($httpCode == 200) {
+                            $response_data = json_decode($response, true);
+                            if (isset($response_data['ok']) && $response_data['ok'] === true) {
+                                $sucesso_envio = true;
+                            } else {
+                                $erro_envio = "Erro Telegram: " . ($response_data['description'] ?? 'Erro desconhecido - ' . $response);
+                            }
+                        } else {
+                            $erro_envio = "Erro HTTP Telegram $httpCode: $response";
+                        }
                     }
                 }
-            }
-            
-            // Salvar log
-            $logs = json_decode(file_get_contents('data/logs.json'), true) ?: [];
-            $logs[] = $log_entry;
-            file_put_contents('data/logs.json', json_encode($logs, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            if ($sucesso_envio) {
-                $sucesso = "Mensagem enviada com sucesso!";
-            } else {
-                $erro = $erro_envio ?: "Erro desconhecido no envio.";
+                
+                // Salvar log no banco
+                executeQuery("INSERT INTO logs (destination, bot_name, type, message, status, platform, user_id, error_details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())", 
+                    [$destino, $bot_name, $tipo_envio, substr($mensagem, 0, 500), $sucesso_envio ? 'success' : 'error', $plataforma_envio, $_SESSION['user_id'], $erro_envio ?: null]);
+                
+                if ($sucesso_envio) {
+                    $sucesso = "Mensagem enviada com sucesso!";
+                } else {
+                    $erro = $erro_envio ?: "Erro desconhecido no envio.";
+                }
             }
         }
+    } catch (Exception $e) {
+        error_log("Enviar error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
+}
+
+// Carregar dados do banco
+try {
+    $bots = fetchAll("SELECT * FROM bots WHERE active = 1 AND (user_id = ? OR user_id IS NULL) ORDER BY name", [$_SESSION['user_id']]);
+    $grupos = fetchAll("SELECT * FROM groups WHERE user_id = ? ORDER BY name", [$_SESSION['user_id']]);
+} catch (Exception $e) {
+    error_log("Enviar load error: " . $e->getMessage());
+    $bots = [];
+    $grupos = [];
 }
 
 include 'includes/header.php';
@@ -374,7 +340,7 @@ include 'includes/header.php';
     <div class="card mt-4">
         <div class="card-header">
             <h3 class="card-title">
-                <i拍賣 bi-info-circle"></i>
+                <i class="bi bi-info-circle"></i>
                 Modelos de Mensagem Rápida
             </h3>
         </div>
@@ -533,13 +499,7 @@ Equipe de Suporte [Nome da Empresa]</pre>
 <script>
     // PHP variables for JavaScript access
     const allBots = <?= json_encode($bots); ?>;
-    const myGroups = <?= json_encode($meus_grupos); ?>;
-    const defaultBotId = '<?= isset($_POST['bot_id']) ? htmlspecialchars($_POST['bot_id']) : ''; ?>';
-    const defaultDestino = '<?= isset($_POST['destino']) ? htmlspecialchars($_POST['destino']) : ''; ?>';
-    const defaultTipoEnvio = '<?= isset($_POST['tipo_envio']) ? htmlspecialchars($_POST['tipo_envio']) : ''; ?>';
-    const defaultPlataformaEnvio = '<?= isset($_POST['plataforma_envio']) ? htmlspecialchars($_POST['plataforma_envio']) : ''; ?>';
-    const defaultMensagem = `<?= isset($_POST['mensagem']) ? htmlspecialchars($_POST['mensagem']) : ''; ?>`;
-    const whatsappConfigExists = <?= json_encode(!empty($config['whatsapp']['server']) && !empty($config['whatsapp']['instance']) && !empty($config['whatsapp']['apikey'])); ?>;
+    const myGroups = <?= json_encode($grupos); ?>;
 
     document.addEventListener('DOMContentLoaded', function() {
         const plataformaSelect = document.getElementById('plataforma_envio');
@@ -559,27 +519,14 @@ Equipe de Suporte [Nome da Empresa]</pre>
             if (selectedPlatform === 'whatsapp') {
                 botSelectContainer.style.display = 'none';
                 botSelect.removeAttribute('required');
-                if (whatsappConfigExists) {
-                    const option = document.createElement('option');
-                    option.value = 'whatsapp_config';
-                    option.textContent = 'Configuração Padrão WhatsApp (do config.json)';
-                    botSelect.appendChild(option);
-                    botSelect.value = 'whatsapp_config';
-                } else {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'Configuração WhatsApp ausente no config.json';
-                    botSelect.appendChild(option);
-                    botSelect.value = '';
-                }
             } else if (selectedPlatform === 'telegram') {
                 botSelectContainer.style.display = 'block';
                 botSelect.setAttribute('required', 'required');
                 allBots.forEach(bot => {
-                    if (bot.ativo && bot.tipo === selectedPlatform) {
+                    if (bot.active && bot.type === selectedPlatform) {
                         const option = document.createElement('option');
                         option.value = bot.id;
-                        option.textContent = `${bot.nome} (${bot.tipo.charAt(0).toUpperCase() + bot.tipo.slice(1)})`;
+                        option.textContent = `${bot.name} (${bot.type.charAt(0).toUpperCase() + bot.type.slice(1)})`;
                         botSelect.appendChild(option);
                     }
                 });
@@ -596,10 +543,10 @@ Equipe de Suporte [Nome da Empresa]</pre>
             destinoSelect.innerHTML = '<option value="">Selecione um grupo...</option>';
             if (selectedPlatform) {
                 myGroups.forEach(grupo => {
-                    if (grupo.tipo === selectedPlatform) {
+                    if (grupo.type === selectedPlatform) {
                         const option = document.createElement('option');
-                        option.value = grupo.id_externo;
-                        option.textContent = `${grupo.nome} (${grupo.id_externo})`;
+                        option.value = grupo.external_id;
+                        option.textContent = `${grupo.name} (${grupo.external_id})`;
                         destinoSelect.appendChild(option);
                     }
                 });
@@ -613,28 +560,7 @@ Equipe de Suporte [Nome da Empresa]</pre>
             destinoSelect.value = '';
         });
 
-        // Initial population if there are default values from a previous submission
-        if (defaultPlataformaEnvio) {
-            plataformaSelect.value = defaultPlataformaEnvio;
-            updateBotOptions();
-            if (defaultBotId) {
-                botSelect.value = defaultBotId;
-            }
-            updateDestinoOptions();
-            if (defaultDestino) {
-                destinoSelect.value = defaultDestino;
-            }
-        } else {
-            updateBotOptions();
-        }
-
-        if (defaultTipoEnvio) {
-            tipoEnvioSelect.value = defaultTipoEnvio;
-            toggleTipoEnvio();
-        }
-        if (defaultMensagem) {
-            mensagemTextarea.value = defaultMensagem;
-        }
+        window.updateBotOptions = updateBotOptions;
 
         window.toggleTipoEnvio = function() {
             const tipo = tipoEnvioSelect.value;

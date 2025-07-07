@@ -1,50 +1,67 @@
-
 <?php
 $page_title = 'Relatórios';
 include 'includes/auth.php';
 verificarLogin();
-
-$logs = json_decode(file_get_contents('data/logs.json'), true) ?: [];
 
 // Filtros
 $filtro_tipo = $_GET['tipo'] ?? '';
 $filtro_status = $_GET['status'] ?? '';
 $filtro_data = $_GET['data'] ?? '';
 
-// Aplicar filtros
-$logs_filtrados = $logs;
-
-if ($filtro_tipo) {
-    $logs_filtrados = array_filter($logs_filtrados, function($log) use ($filtro_tipo) {
-        return stripos($log['tipo'], $filtro_tipo) !== false;
-    });
-}
-
-if ($filtro_status) {
-    $logs_filtrados = array_filter($logs_filtrados, function($log) use ($filtro_status) {
-        return $log['status'] == $filtro_status;
-    });
-}
-
-if ($filtro_data) {
-    $logs_filtrados = array_filter($logs_filtrados, function($log) use ($filtro_data) {
-        return date('Y-m-d', strtotime($log['data_hora'])) == $filtro_data;
-    });
+// Carregar dados do banco
+try {
+    // Query base
+    $where_conditions = ["user_id = ?"];
+    $params = [$_SESSION['user_id']];
+    
+    // Aplicar filtros
+    if ($filtro_tipo) {
+        $where_conditions[] = "type LIKE ?";
+        $params[] = "%$filtro_tipo%";
+    }
+    
+    if ($filtro_status) {
+        $where_conditions[] = "status = ?";
+        $params[] = $filtro_status;
+    }
+    
+    if ($filtro_data) {
+        $where_conditions[] = "DATE(created_at) = ?";
+        $params[] = $filtro_data;
+    }
+    
+    $where_clause = implode(' AND ', $where_conditions);
+    
+    // Buscar logs filtrados
+    $logs_filtrados = fetchAll("SELECT * FROM logs WHERE $where_clause ORDER BY created_at DESC", $params);
+    
+    // Buscar todos os logs para estatísticas gerais
+    $logs = fetchAll("SELECT * FROM logs WHERE user_id = ? ORDER BY created_at DESC", [$_SESSION['user_id']]);
+    
+    // Buscar tipos únicos para o filtro
+    $tipos_result = fetchAll("SELECT DISTINCT type FROM logs WHERE user_id = ? AND type IS NOT NULL ORDER BY type", [$_SESSION['user_id']]);
+    $tipos = array_column($tipos_result, 'type');
+    
+} catch (Exception $e) {
+    error_log("Relatório error: " . $e->getMessage());
+    $logs_filtrados = [];
+    $logs = [];
+    $tipos = [];
 }
 
 // Estatísticas
 $total_envios = count($logs);
-$envios_sucesso = count(array_filter($logs, function($log) { return $log['status'] == 'sucesso'; }));
-$envios_erro = count(array_filter($logs, function($log) { return $log['status'] == 'erro'; }));
+$envios_sucesso = count(array_filter($logs, function($log) { return $log['status'] == 'success'; }));
+$envios_erro = count(array_filter($logs, function($log) { return $log['status'] == 'error'; }));
 $taxa_sucesso = $total_envios > 0 ? round(($envios_sucesso / $total_envios) * 100, 1) : 0;
 
 // Tipos mais enviados
-$tipos = [];
+$tipos_count = [];
 foreach ($logs as $log) {
-    $tipo = $log['tipo'];
-    $tipos[$tipo] = ($tipos[$tipo] ?? 0) + 1;
+    $tipo = $log['type'] ?? 'Não definido';
+    $tipos_count[$tipo] = ($tipos_count[$tipo] ?? 0) + 1;
 }
-arsort($tipos);
+arsort($tipos_count);
 
 include 'includes/header.php';
 ?>
@@ -85,12 +102,12 @@ include 'includes/header.php';
         touch-action: manipulation;
         font-size: 1rem;
         padding: 0.5rem 1rem;
-        width: 100%; /* Garantir largura uniforme */
+        width: 100%;
         box-sizing: border-box;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 0.5rem; /* Espaço entre ícone e texto */
+        gap: 0.5rem;
     }
     .table-responsive {
         overflow-x: auto;
@@ -111,13 +128,11 @@ include 'includes/header.php';
         padding: 1rem;
         border-radius: 5px;
     }
-    /* Estilizar container de botões no formulário e exportação */
     .button-group {
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
     }
-    /* Mobile-specific styles */
     @media (max-width: 768px) {
         .cards-grid {
             grid-template-columns: 1fr;
@@ -147,16 +162,16 @@ include 'includes/header.php';
         }
         .btn {
             font-size: 0.9rem;
-            min-height: 48px; /* Altura uniforme */
+            min-height: 48px;
             padding: 0.5rem;
         }
         .button-group {
-            flex-direction: row; /* Lado a lado */
-            justify-content: space-between; /* Alinhar com espaçamento uniforme */
+            flex-direction: row;
+            justify-content: space-between;
         }
         .button-group .btn {
-            flex: 1; /* Botões dividem espaço igualmente */
-            max-width: calc(50% - 0.25rem); /* Metade da largura menos gap */
+            flex: 1;
+            max-width: calc(50% - 0.25rem);
         }
         .table {
             font-size: 0.8rem;
@@ -197,10 +212,10 @@ include 'includes/header.php';
             max-width: 100px;
         }
         .button-group {
-            flex-direction: column; /* Empilhar em telas muito pequenas */
+            flex-direction: column;
         }
         .button-group .btn {
-            max-width: 100%; /* Voltar à largura total */
+            max-width: 100%;
         }
     }
 </style>
@@ -262,7 +277,7 @@ include 'includes/header.php';
             <?php
                 $hoje = date('Y-m-d');
                 $envios_hoje = count(array_filter($logs, function($log) use ($hoje) {
-                    return date('Y-m-d', strtotime($log['data_hora'])) == $hoje;
+                    return date('Y-m-d', strtotime($log['created_at'])) == $hoje;
                 }));
             ?>
             <div style="font-size: 2rem; font-weight: bold; color: #ffc107;">
@@ -273,7 +288,7 @@ include 'includes/header.php';
     </div>
 </div>
 
-<?php if (!empty($tipos)): ?>
+<?php if (!empty($tipos_count)): ?>
 <div class="card" style="margin-top: 2rem;">
     <div class="card-header">
         <h3 class="card-title">
@@ -283,12 +298,12 @@ include 'includes/header.php';
         </div>
     <div class="card-body">
         <div class="row">
-            <?php foreach (array_slice($tipos, 0, 6) as $tipo => $quantidade): ?>
+            <?php foreach (array_slice($tipos_count, 0, 6) as $tipo => $quantidade): ?>
             <div class="col-md-4 mb-3">
                 <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
-                    <strong><?= $tipo ?></strong>
+                    <strong><?= htmlspecialchars($tipo) ?></strong>
                     <div style="font-size: 1.5rem; color: #007BFF;"><?= $quantidade ?></div>
-                    <div style="background: #007BFF; height: 4px; border-radius: 2px; width: <?= ($quantidade / max($tipos)) * 100 ?>%;"></div>
+                    <div style="background: #007BFF; height: 4px; border-radius: 2px; width: <?= ($quantidade / max($tipos_count)) * 100 ?>%;"></div>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -310,9 +325,9 @@ include 'includes/header.php';
                 <label class="form-label">Tipo</label>
                 <select name="tipo" class="form-select">
                     <option value="">Todos os tipos</option>
-                    <?php foreach (array_keys($tipos) as $tipo): ?>
-                    <option value="<?= $tipo ?>" <?= $filtro_tipo == $tipo ? 'selected' : '' ?>>
-                        <?= $tipo ?>
+                    <?php foreach ($tipos as $tipo): ?>
+                    <option value="<?= htmlspecialchars($tipo) ?>" <?= $filtro_tipo == $tipo ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($tipo) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -322,18 +337,18 @@ include 'includes/header.php';
                 <label class="form-label">Status</label>
                 <select name="status" class="form-select">
                     <option value="">Todos os status</option>
-                    <option value="sucesso" <?= $filtro_status == 'sucesso' ? 'selected' : '' ?>>Sucesso</option>
-                    <option value="erro" <?= $filtro_status == 'erro' ? 'selected' : '' ?>>Erro</option>
+                    <option value="success" <?= $filtro_status == 'success' ? 'selected' : '' ?>>Sucesso</option>
+                    <option value="error" <?= $filtro_status == 'error' ? 'selected' : '' ?>>Erro</option>
                 </select>
             </div>
             
             <div class="col-md-3">
                 <label class="form-label">Data</label>
-                <input type="date" name="data" class="form-control" value="<?= $filtro_data ?>">
+                <input type="date" name="data" class="form-control" value="<?= htmlspecialchars($filtro_data) ?>">
             </div>
             
             <div class="col-md-3">
-                <label class="form-label"> </label>
+                <label class="form-label"> </label>
                 <div class="button-group">
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-search"></i> Filtrar
@@ -359,20 +374,20 @@ include 'includes/header.php';
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach (array_reverse($logs_filtrados) as $log): ?>
+                    <?php foreach ($logs_filtrados as $log): ?>
                     <tr>
-                        <td><?= date('d/m/Y H:i', strtotime($log['data_hora'])) ?></td>
-                        <td><?= substr($log['destino'], 0, 20) ?>...</td>
-                        <td><?= $log['bot'] ?></td>
-                        <td><?= $log['tipo'] ?></td>
+                        <td><?= date('d/m/Y H:i', strtotime($log['created_at'])) ?></td>
+                        <td><?= htmlspecialchars(substr($log['destination'], 0, 20)) ?>...</td>
+                        <td><?= htmlspecialchars($log['bot_name'] ?? 'N/A') ?></td>
+                        <td><?= htmlspecialchars($log['type'] ?? 'N/A') ?></td>
                         <td>
-                            <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?= htmlspecialchars($log['mensagem']) ?>">
-                                <?= substr($log['mensagem'], 0, 50) ?>...
+                            <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?= htmlspecialchars($log['message'] ?? '') ?>">
+                                <?= htmlspecialchars(substr($log['message'] ?? '', 0, 50)) ?>...
                             </div>
                         </td>
                         <td>
-                            <span class="badge <?= $log['status'] == 'sucesso' ? 'badge-success' : 'badge-danger' ?>">
-                                <?= $log['status'] == 'sucesso' ? '✅ Sucesso' : '❌ Erro' ?>
+                            <span class="badge <?= $log['status'] == 'success' ? 'badge-success' : 'badge-danger' ?>">
+                                <?= $log['status'] == 'success' ? '✅ Sucesso' : '❌ Erro' ?>
                             </span>
                         </td>
                     </tr>
@@ -404,7 +419,7 @@ include 'includes/header.php';
     <div class="card-body">
         <p>Exporte os dados do relatório para análise externa:</p>
         <div class="button-group">
-            <a href="?export=csv<?= $filtro_tipo ? '&tipo=' . $filtro_tipo : '' ?><?= $filtro_status ? '&status=' . $filtro_status : '' ?><?= $filtro_data ? '&data=' . $filtro_data : '' ?>" class="btn btn-success">
+            <a href="?export=csv<?= $filtro_tipo ? '&tipo=' . urlencode($filtro_tipo) : '' ?><?= $filtro_status ? '&status=' . urlencode($filtro_status) : '' ?><?= $filtro_data ? '&data=' . urlencode($filtro_data) : '' ?>" class="btn btn-success">
                 <i class="bi bi-file-earmark-spreadsheet"></i> Exportar CSV
             </a>
             <button onclick="window.print()" class="btn btn-secondary">
@@ -425,12 +440,12 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
     
     foreach ($logs_filtrados as $log) {
         fputcsv($output, [
-            $log['data_hora'],
-            $log['destino'],
-            $log['bot'],
-            $log['tipo'],
+            $log['created_at'],
+            $log['destination'],
+            $log['bot_name'] ?? 'N/A',
+            $log['type'] ?? 'N/A',
             $log['status'],
-            $log['mensagem']
+            $log['message'] ?? ''
         ]);
     }
     

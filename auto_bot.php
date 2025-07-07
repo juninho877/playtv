@@ -3,159 +3,48 @@ $page_title = 'AutoBot WhatsApp';
 include 'includes/auth.php';
 verificarLogin();
 
-// Iniciar sessão para CSRF
-session_start();
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
-// Carregar configurações
-$config = json_decode(file_get_contents('data/config.json'), true) ?: [];
-
-// Inicializar configurações se não existirem
-if (!file_exists('data/autobot_config.json')) {
-    $initial_config = [
-        'ativo' => false,
-        'emoji' => '👋',
-        'saudacao' => 'Olá! Seja bem-vindo(a)! Como posso ajudá-lo(a) hoje?',
-        'mensagem_padrao' => 'Desculpe, não entendi sua mensagem. Digite *MENU* para ver as opções disponíveis ou aguarde que em breve um atendente irá lhe responder.',
-        'mensagem_fora_horario' => 'Estamos fora do horário de atendimento. Nosso horário é de {{horario_inicio}} às {{horario_fim}}. Retornaremos em breve!',
-        'horario_ativo' => false,
-        'horario_inicio' => '08:00',
-        'horario_fim' => '18:00',
-        'tempo_inatividade' => 300,
-        'estatisticas' => [
-            'mensagens_respondidas' => 0,
-            'conversas_iniciadas' => 0,
-            'palavras_ativadas' => 0,
-            'pessoas_respondidas' => 0
-        ]
-    ];
-    if (is_writable('data/')) {
-        file_put_contents('data/autobot_config.json', json_encode($initial_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    } else {
-        $erro = 'Sem permissão para gravar em data/autobot_config.json!';
-    }
-}
-
-if (!file_exists('data/palavras_chave.json')) {
-    if (is_writable('data/')) {
-        file_put_contents('data/palavras_chave.json', json_encode([], JSON_PRETTY_PRINT));
-    } else {
-        $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
-    }
-}
-
-if (!file_exists('data/conversas.json')) {
-    if (is_writable('data/')) {
-        file_put_contents('data/conversas.json', json_encode([], JSON_PRETTY_PRINT));
-    } else {
-        $erro = 'Sem permissão para gravar em data/conversas.json!';
-    }
-}
-
-if (!file_exists('data/variaveis.json')) {
-    $initial_variaveis = [
-        'valor_promocao' => 'R$ 99,90',
-        'pix' => 'chave-pix@exemplo.com',
-        'nome_banco' => 'Banco Exemplo',
-        'nome_titular' => 'João Silva'
-    ];
-    if (is_writable('data/')) {
-        file_put_contents('data/variaveis.json', json_encode($initial_variaveis, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    } else {
-        $erro = 'Sem permissão para gravar em data/variaveis.json!';
-    }
-}
-
-$autobot_config = json_decode(file_get_contents('data/autobot_config.json'), true) ?: [
-    'ativo' => false,
-    'emoji' => '👋',
-    'saudacao' => 'Olá! Seja bem-vindo(a)! Como posso ajudá-lo(a) hoje?',
-    'mensagem_padrao' => 'Desculpe, não entendi sua mensagem. Digite *MENU* para ver as opções disponíveis ou aguarde que em breve um atendente irá lhe responder.',
-    'mensagem_fora_horario' => 'Estamos fora do horário de atendimento. Nosso horário é de {{horario_inicio}} às {{horario_fim}}. Retornaremos em breve!',
-    'horario_ativo' => false,
-    'horario_inicio' => '08:00',
-    'horario_fim' => '18:00',
-    'tempo_inatividade' => 300,
-    'estatisticas' => [
-        'mensagens_respondidas' => 0,
-        'conversas_iniciadas' => 0,
-        'palavras_ativadas' => 0,
-        'pessoas_respondidas' => 0
-    ]
-];
-$palavras_chave = json_decode(file_get_contents('data/palavras_chave.json'), true) ?: [];
-$conversas = json_decode(file_get_contents('data/conversas.json'), true) ?: [];
-$variaveis = json_decode(file_get_contents('data/variaveis.json'), true) ?: [];
-
-// Calcular número de pessoas únicas respondidas
-$autobot_config['estatisticas']['pessoas_respondidas'] = count(array_unique(array_column($conversas, 'numero')));
-file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-// Migrar dados do sistema antigo se existir
-if (file_exists('data/auto_bot_rules.json') && empty($palavras_chave)) {
-    $old_rules = json_decode(file_get_contents('data/auto_bot_rules.json'), true) ?: [];
-    $new_palavras = [];
-    
-    foreach ($old_rules as $id => $rule) {
-        $new_palavras[] = [
-            'id' => $id,
-            'palavra' => $rule['keyword'],
-            'resposta' => $rule['response'],
-            'ativo' => $rule['enabled'] ?? true,
-            'contador' => 0,
-            'tempo_resposta' => 0,
-            'criado_em' => date('Y-m-d H:i:s')
-        ];
-    }
-    
-    if (is_writable('data/')) {
-        file_put_contents('data/palavras_chave.json', json_encode($new_palavras, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        $palavras_chave = $new_palavras;
-    } else {
-        $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
-    }
-}
+$sucesso = '';
+$erro = '';
 
 // Processar ações
-if ($_POST && isset($_POST['csrf_token']) && $_POST['csrf_token'] === $_SESSION['csrf_token']) {
-    if (isset($_POST['action'])) {
+if ($_POST && isset($_POST['action'])) {
+    try {
         switch ($_POST['action']) {
             case 'toggle_bot':
-                $autobot_config['ativo'] = !$autobot_config['ativo'];
-                if (is_writable('data/autobot_config.json')) {
-                    file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Bot " . ($autobot_config['ativo'] ? 'ativado' : 'desativado') . " por usuário\n", FILE_APPEND);
-                    $sucesso = $autobot_config['ativo'] ? 'Bot ativado com sucesso!' : 'Bot desativado com sucesso!';
+                // Buscar configuração atual
+                $config = fetchOne("SELECT * FROM autobot_config WHERE user_id = ?", [$_SESSION['user_id']]);
+                
+                if ($config) {
+                    $new_status = $config['active'] ? 0 : 1;
+                    executeQuery("UPDATE autobot_config SET active = ?, updated_at = NOW() WHERE user_id = ?", 
+                        [$new_status, $_SESSION['user_id']]);
                 } else {
-                    $erro = 'Sem permissão para gravar em data/autobot_config.json!';
+                    // Criar configuração inicial
+                    executeQuery("INSERT INTO autobot_config (user_id, active) VALUES (?, 1)", [$_SESSION['user_id']]);
+                    $new_status = 1;
                 }
+                
+                $sucesso = $new_status ? 'Bot ativado com sucesso!' : 'Bot desativado com sucesso!';
                 break;
                 
             case 'salvar_configuracoes':
-                $emoji = filter_input(INPUT_POST, 'emoji', FILTER_SANITIZE_STRING);
-                $saudacao = filter_input(INPUT_POST, 'saudacao', FILTER_SANITIZE_STRING);
-                $mensagem_padrao = filter_input(INPUT_POST, 'mensagem_padrao', FILTER_SANITIZE_STRING);
-                $mensagem_fora_horario = filter_input(INPUT_POST, 'mensagem_fora_horario', FILTER_SANITIZE_STRING);
-                $horario_ativo = isset($_POST['horario_ativo']);
-                $horario_inicio = filter_input(INPUT_POST, 'horario_inicio', FILTER_SANITIZE_STRING);
-                $horario_fim = filter_input(INPUT_POST, 'horario_fim', FILTER_SANITIZE_STRING);
-                $tempo_inatividade_valor = filter_input(INPUT_POST, 'tempo_inatividade_valor', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-                $tempo_inatividade_unidade = filter_input(INPUT_POST, 'tempo_inatividade_unidade', FILTER_SANITIZE_STRING);
+                $emoji = trim($_POST['emoji'] ?? '');
+                $saudacao = trim($_POST['saudacao'] ?? '');
+                $mensagem_padrao = trim($_POST['mensagem_padrao'] ?? '');
+                $mensagem_fora_horario = trim($_POST['mensagem_fora_horario'] ?? '');
+                $horario_ativo = isset($_POST['horario_ativo']) ? 1 : 0;
+                $horario_inicio = $_POST['horario_inicio'] ?? '08:00';
+                $horario_fim = $_POST['horario_fim'] ?? '18:00';
+                $tempo_inatividade_valor = (int)($_POST['tempo_inatividade_valor'] ?? 5);
+                $tempo_inatividade_unidade = $_POST['tempo_inatividade_unidade'] ?? 'minutos';
                 
-                if (!$saudacao || !$mensagem_padrao || !$tempo_inatividade_valor) {
+                if (empty($saudacao) || empty($mensagem_padrao) || $tempo_inatividade_valor < 1) {
                     $erro = 'Campos obrigatórios (saudação, mensagem padrão, tempo de inatividade) não preenchidos!';
                     break;
                 }
                 
-                if ($horario_ativo && (!$horario_inicio || !$horario_fim || !$mensagem_fora_horario)) {
-                    $erro = 'Preencha todos os campos de horário (início, fim e mensagem fora de horário) quando ativar o horário de funcionamento!';
-                    break;
-                }
-                
-                if ($horario_ativo && (!preg_match('/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/', $horario_inicio) || !preg_match('/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/', $horario_fim))) {
-                    $erro = 'Horários de início ou fim inválidos! Use o formato HH:MM.';
+                if ($horario_ativo && (empty($horario_inicio) || empty($horario_fim) || empty($mensagem_fora_horario))) {
+                    $erro = 'Preencha todos os campos de horário quando ativar o horário de funcionamento!';
                     break;
                 }
                 
@@ -172,140 +61,182 @@ if ($_POST && isset($_POST['csrf_token']) && $_POST['csrf_token'] === $_SESSION[
                     break;
                 }
                 
-                $autobot_config['emoji'] = $emoji;
-                $autobot_config['saudacao'] = $emoji . ' ' . $saudacao;
-                $autobot_config['mensagem_padrao'] = $emoji . ' ' . $mensagem_padrao;
-                $autobot_config['mensagem_fora_horario'] = $mensagem_fora_horario ? ($emoji . ' ' . $mensagem_fora_horario) : $autobot_config['mensagem_fora_horario'];
-                $autobot_config['horario_ativo'] = $horario_ativo;
-                $autobot_config['horario_inicio'] = $horario_inicio ?: $autobot_config['horario_inicio'];
-                $autobot_config['horario_fim'] = $horario_fim ?: $autobot_config['horario_fim'];
-                $autobot_config['tempo_inatividade'] = $tempo_inatividade;
+                // Preparar mensagens com emoji
+                $greeting_message = $emoji ? $emoji . ' ' . $saudacao : $saudacao;
+                $default_message = $emoji ? $emoji . ' ' . $mensagem_padrao : $mensagem_padrao;
+                $out_of_hours_message = $mensagem_fora_horario ? ($emoji ? $emoji . ' ' . $mensagem_fora_horario : $mensagem_fora_horario) : '';
                 
-                if (is_writable('data/autobot_config.json')) {
-                    file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Configurações do bot atualizadas\n", FILE_APPEND);
-                    $sucesso = 'Configurações salvas com sucesso!';
-                } else {
-                    $erro = 'Sem permissão para gravar em data/autobot_config.json!';
-                }
+                // Inserir ou atualizar configuração
+                executeQuery("INSERT INTO autobot_config (user_id, emoji, greeting_message, default_message, out_of_hours_message, hours_active, start_time, end_time, inactivity_timeout, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE emoji = VALUES(emoji), greeting_message = VALUES(greeting_message), default_message = VALUES(default_message), out_of_hours_message = VALUES(out_of_hours_message), hours_active = VALUES(hours_active), start_time = VALUES(start_time), end_time = VALUES(end_time), inactivity_timeout = VALUES(inactivity_timeout), updated_at = NOW()", 
+                    [$_SESSION['user_id'], $emoji, $greeting_message, $default_message, $out_of_hours_message, $horario_ativo, $horario_inicio, $horario_fim, $tempo_inatividade]);
+                
+                $sucesso = 'Configurações salvas com sucesso!';
                 break;
                 
             case 'salvar_variaveis':
-                $variaveis['valor_promocao'] = filter_input(INPUT_POST, 'valor_promocao', FILTER_SANITIZE_STRING) ?: 'R$ 99,90';
-                $variaveis['pix'] = filter_input(INPUT_POST, 'pix', FILTER_SANITIZE_STRING) ?: 'chave-pix@exemplo.com';
-                $variaveis['nome_banco'] = filter_input(INPUT_POST, 'nome_banco', FILTER_SANITIZE_STRING) ?: 'Banco Exemplo';
-                $variaveis['nome_titular'] = filter_input(INPUT_POST, 'nome_titular', FILTER_SANITIZE_STRING) ?: 'João Silva';
-                if (is_writable('data/variaveis.json')) {
-                    file_put_contents('data/variaveis.json', json_encode($variaveis, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Variáveis dinâmicas atualizadas\n", FILE_APPEND);
-                    $sucesso = 'Variáveis dinâmicas salvas com sucesso!';
-                } else {
-                    $erro = 'Sem permissão para gravar em data/variaveis.json!';
+                $variables = [
+                    'valor_promocao' => trim($_POST['valor_promocao'] ?? 'R$ 99,90'),
+                    'pix' => trim($_POST['pix'] ?? 'chave-pix@exemplo.com'),
+                    'nome_banco' => trim($_POST['nome_banco'] ?? 'Banco Exemplo'),
+                    'nome_titular' => trim($_POST['nome_titular'] ?? 'João Silva')
+                ];
+                
+                foreach ($variables as $name => $value) {
+                    executeQuery("INSERT INTO dynamic_variables (user_id, variable_name, variable_value, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE variable_value = VALUES(variable_value), updated_at = NOW()", 
+                        [$_SESSION['user_id'], $name, $value]);
                 }
+                
+                $sucesso = 'Variáveis dinâmicas salvas com sucesso!';
                 break;
                 
             case 'adicionar_palavra':
-                $palavra = trim(filter_input(INPUT_POST, 'palavra', FILTER_SANITIZE_STRING));
-                $resposta = filter_input(INPUT_POST, 'resposta', FILTER_SANITIZE_STRING);
-                $tempo_resposta = filter_input(INPUT_POST, 'tempo_resposta', FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'default' => 0]]);
-                if (!$palavra || !$resposta) {
+                $palavra = trim($_POST['palavra'] ?? '');
+                $resposta = trim($_POST['resposta'] ?? '');
+                $tempo_resposta = (int)($_POST['tempo_resposta'] ?? 0);
+                $ativo = isset($_POST['ativo']) ? 1 : 0;
+                
+                if (empty($palavra) || empty($resposta)) {
                     $erro = 'Palavra ou resposta inválida!';
                     break;
                 }
-                $nova_palavra = [
-                    'id' => time() . rand(100, 999),
-                    'palavra' => $palavra,
-                    'resposta' => $autobot_config['emoji'] . ' ' . $resposta,
-                    'ativo' => isset($_POST['ativo']) ? true : false,
-                    'contador' => 0,
-                    'tempo_resposta' => $tempo_resposta,
-                    'criado_em' => date('Y-m-d H:i:s')
-                ];
-                $palavras_chave[] = $nova_palavra;
-                if (is_writable('data/palavras_chave.json')) {
-                    file_put_contents('data/palavras_chave.json', json_encode($palavras_chave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    $autobot_config['estatisticas']['palavras_ativadas'] = count(array_filter($palavras_chave, fn($p) => $p['ativo']));
-                    file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Palavra-chave adicionada: {$palavra}\n", FILE_APPEND);
-                    $sucesso = 'Palavra-chave adicionada com sucesso!';
-                } else {
-                    $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
-                }
+                
+                // Buscar emoji da configuração
+                $config = fetchOne("SELECT emoji FROM autobot_config WHERE user_id = ?", [$_SESSION['user_id']]);
+                $emoji = $config['emoji'] ?? '';
+                $response_with_emoji = $emoji ? $emoji . ' ' . $resposta : $resposta;
+                
+                executeQuery("INSERT INTO autobot_keywords (user_id, keyword, response, active, response_delay, created_at) VALUES (?, ?, ?, ?, ?, NOW())", 
+                    [$_SESSION['user_id'], $palavra, $response_with_emoji, $ativo, $tempo_resposta]);
+                
+                $sucesso = 'Palavra-chave adicionada com sucesso!';
                 break;
                 
             case 'editar_palavra':
-                $palavra_id = filter_input(INPUT_POST, 'palavra_id', FILTER_SANITIZE_STRING);
-                $palavra = trim(filter_input(INPUT_POST, 'palavra', FILTER_SANITIZE_STRING));
-                $resposta = filter_input(INPUT_POST, 'resposta', FILTER_SANITIZE_STRING);
-                $tempo_resposta = filter_input(INPUT_POST, 'tempo_resposta', FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'default' => 0]]);
-                if (!$palavra_id || !$palavra || !$resposta) {
+                $palavra_id = (int)$_POST['palavra_id'];
+                $palavra = trim($_POST['palavra'] ?? '');
+                $resposta = trim($_POST['resposta'] ?? '');
+                $tempo_resposta = (int)($_POST['tempo_resposta'] ?? 0);
+                
+                if (empty($palavra) || empty($resposta)) {
                     $erro = 'Campos inválidos!';
                     break;
                 }
-                foreach ($palavras_chave as &$p) {
-                    if ($p['id'] == $palavra_id) {
-                        $p['palavra'] = $palavra;
-                        $p['resposta'] = $autobot_config['emoji'] . ' ' . $resposta;
-                        $p['tempo_resposta'] = $tempo_resposta;
-                        break;
-                    }
-                }
-                if (is_writable('data/palavras_chave.json')) {
-                    file_put_contents('data/palavras_chave.json', json_encode($palavras_chave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Palavra-chave editada: {$palavra}\n", FILE_APPEND);
+                
+                // Buscar emoji da configuração
+                $config = fetchOne("SELECT emoji FROM autobot_config WHERE user_id = ?", [$_SESSION['user_id']]);
+                $emoji = $config['emoji'] ?? '';
+                $response_with_emoji = $emoji ? $emoji . ' ' . $resposta : $resposta;
+                
+                $affected = executeQuery("UPDATE autobot_keywords SET keyword = ?, response = ?, response_delay = ?, updated_at = NOW() WHERE id = ? AND user_id = ?", 
+                    [$palavra, $response_with_emoji, $tempo_resposta, $palavra_id, $_SESSION['user_id']])->rowCount();
+                
+                if ($affected > 0) {
                     $sucesso = 'Palavra-chave editada com sucesso!';
                 } else {
-                    $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
+                    $erro = 'Palavra-chave não encontrada!';
                 }
                 break;
                 
             case 'toggle_palavra':
-                $palavra_id = filter_input(INPUT_POST, 'palavra_id', FILTER_SANITIZE_STRING);
-                if (!$palavra_id) {
-                    $erro = 'ID de palavra inválido!';
+                $palavra_id = (int)$_POST['palavra_id'];
+                
+                $keyword = fetchOne("SELECT active FROM autobot_keywords WHERE id = ? AND user_id = ?", [$palavra_id, $_SESSION['user_id']]);
+                if (!$keyword) {
+                    $erro = 'Palavra-chave não encontrada!';
                     break;
                 }
-                foreach ($palavras_chave as &$p) {
-                    if ($p['id'] == $palavra_id) {
-                        $p['ativo'] = !$p['ativo'];
-                        file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Palavra-chave {$p['palavra']} " . ($p['ativo'] ? 'ativada' : 'desativada') . "\n", FILE_APPEND);
-                        break;
-                    }
-                }
-                if (is_writable('data/palavras_chave.json')) {
-                    file_put_contents('data/palavras_chave.json', json_encode($palavras_chave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    $autobot_config['estatisticas']['palavras_ativadas'] = count(array_filter($palavras_chave, fn($p) => $p['ativo']));
-                    file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                } else {
-                    $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
-                }
+                
+                $new_status = $keyword['active'] ? 0 : 1;
+                executeQuery("UPDATE autobot_keywords SET active = ?, updated_at = NOW() WHERE id = ? AND user_id = ?", 
+                    [$new_status, $palavra_id, $_SESSION['user_id']]);
+                
+                $sucesso = 'Status da palavra-chave alterado!';
                 break;
                 
             case 'deletar_palavra':
-                $palavra_id = filter_input(INPUT_POST, 'palavra_id', FILTER_SANITIZE_STRING);
-                if (!$palavra_id) {
-                    $erro = 'ID de palavra inválido!';
-                    break;
-                }
-                $palavras_chave = array_values(array_filter($palavras_chave, fn($p) => $p['id'] != $palavra_id));
-                if (is_writable('data/palavras_chave.json')) {
-                    file_put_contents('data/palavras_chave.json', json_encode($palavras_chave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    $autobot_config['estatisticas']['palavras_ativadas'] = count(array_filter($palavras_chave, fn($p) => $p['ativo']));
-                    file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    file_put_contents('data/webhook.log', "[" . date('Y-m-d H:i:s') . "] Palavra-chave ID {$palavra_id} deletada\n", FILE_APPEND);
+                $palavra_id = (int)$_POST['palavra_id'];
+                
+                $affected = executeQuery("DELETE FROM autobot_keywords WHERE id = ? AND user_id = ?", [$palavra_id, $_SESSION['user_id']])->rowCount();
+                
+                if ($affected > 0) {
                     $sucesso = 'Palavra-chave deletada com sucesso!';
                 } else {
-                    $erro = 'Sem permissão para gravar em data/palavras_chave.json!';
+                    $erro = 'Palavra-chave não encontrada!';
                 }
                 break;
         }
+    } catch (Exception $e) {
+        error_log("AutoBot error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
-} elseif ($_POST) {
-    $erro = 'Token CSRF inválido!';
 }
 
-// Verificar se WhatsApp está configurado
-$whatsapp_configurado = !empty($config['whatsapp']['server']) && !empty($config['whatsapp']['instance']) && !empty($config['whatsapp']['apikey']);
+// Carregar dados do banco
+try {
+    // Configuração do AutoBot
+    $autobot_config = fetchOne("SELECT * FROM autobot_config WHERE user_id = ?", [$_SESSION['user_id']]);
+    if (!$autobot_config) {
+        $autobot_config = [
+            'active' => false,
+            'emoji' => '👋',
+            'greeting_message' => 'Olá! Seja bem-vindo(a)! Como posso ajudá-lo(a) hoje?',
+            'default_message' => 'Desculpe, não entendi sua mensagem. Digite *MENU* para ver as opções disponíveis ou aguarde que em breve um atendente irá lhe responder.',
+            'out_of_hours_message' => 'Estamos fora do horário de atendimento. Nosso horário é de {{horario_inicio}} às {{horario_fim}}. Retornaremos em breve!',
+            'hours_active' => false,
+            'start_time' => '08:00:00',
+            'end_time' => '18:00:00',
+            'inactivity_timeout' => 300
+        ];
+    }
+    
+    // Palavras-chave
+    $palavras_chave = fetchAll("SELECT * FROM autobot_keywords WHERE user_id = ? ORDER BY created_at DESC", [$_SESSION['user_id']]);
+    
+    // Variáveis dinâmicas
+    $variables_rows = fetchAll("SELECT variable_name, variable_value FROM dynamic_variables WHERE user_id = ?", [$_SESSION['user_id']]);
+    $variaveis = [];
+    foreach ($variables_rows as $row) {
+        $variaveis[$row['variable_name']] = $row['variable_value'];
+    }
+    
+    // Estatísticas
+    $stats = fetchOne("SELECT * FROM autobot_statistics WHERE user_id = ?", [$_SESSION['user_id']]);
+    if (!$stats) {
+        $stats = [
+            'messages_sent' => 0,
+            'conversations_started' => 0,
+            'active_keywords' => 0,
+            'unique_contacts' => 0
+        ];
+    }
+    
+    // Atualizar contadores em tempo real
+    $active_keywords_count = fetchOne("SELECT COUNT(*) as count FROM autobot_keywords WHERE user_id = ? AND active = 1", [$_SESSION['user_id']])['count'] ?? 0;
+    $unique_contacts_count = fetchOne("SELECT COUNT(DISTINCT phone_number) as count FROM autobot_conversations WHERE user_id = ?", [$_SESSION['user_id']])['count'] ?? 0;
+    
+    // Atualizar estatísticas
+    executeQuery("INSERT INTO autobot_statistics (user_id, active_keywords, unique_contacts, last_updated) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE active_keywords = VALUES(active_keywords), unique_contacts = VALUES(unique_contacts), last_updated = NOW()", 
+        [$_SESSION['user_id'], $active_keywords_count, $unique_contacts_count]);
+    
+    $stats['active_keywords'] = $active_keywords_count;
+    $stats['unique_contacts'] = $unique_contacts_count;
+    
+    // Verificar se WhatsApp está configurado
+    $whatsapp_config = fetchAll("SELECT config_key, config_value FROM system_config WHERE config_key IN ('whatsapp_server', 'whatsapp_instance', 'whatsapp_apikey')");
+    $whatsapp_settings = [];
+    foreach ($whatsapp_config as $setting) {
+        $whatsapp_settings[$setting['config_key']] = $setting['config_value'];
+    }
+    $whatsapp_configurado = !empty($whatsapp_settings['whatsapp_server']) && !empty($whatsapp_settings['whatsapp_instance']) && !empty($whatsapp_settings['whatsapp_apikey']);
+    
+} catch (Exception $e) {
+    error_log("AutoBot load error: " . $e->getMessage());
+    $autobot_config = ['active' => false];
+    $palavras_chave = [];
+    $variaveis = [];
+    $stats = ['messages_sent' => 0, 'conversations_started' => 0, 'active_keywords' => 0, 'unique_contacts' => 0];
+    $whatsapp_configurado = false;
+}
 
 // Lista de emojis compatíveis com WhatsApp
 $emojis = [
@@ -357,7 +288,7 @@ $emojis = [
 include 'includes/header.php';
 ?>
 
-<!-- Inline CSS for custom components not in assets/style.css -->
+<!-- Inline CSS for custom components -->
 <style>
 .autobot-toggle {
     position: relative;
@@ -504,11 +435,11 @@ input:checked + .slider:before {
 </div>
 <?php endif; ?>
 
-<?php if (isset($sucesso)): ?>
+<?php if (!empty($sucesso)): ?>
 <div class="alert alert-success"><?= htmlspecialchars($sucesso) ?></div>
 <?php endif; ?>
 
-<?php if (isset($erro)): ?>
+<?php if (!empty($erro)): ?>
 <div class="alert alert-danger"><?= htmlspecialchars($erro) ?></div>
 <?php endif; ?>
 
@@ -525,14 +456,13 @@ input:checked + .slider:before {
             <p><strong>Descrição:</strong> Ative ou desative o bot. Quando ativo, ele responde automaticamente às mensagens recebidas com base nas configurações e palavras-chave definidas.</p>
             <form method="POST" style="display: inline;">
                 <input type="hidden" name="action" value="toggle_bot">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                 <label class="autobot-toggle">
-                    <input type="checkbox" <?= $autobot_config['ativo'] ? 'checked' : '' ?> onchange="this.form.submit()">
+                    <input type="checkbox" <?= $autobot_config['active'] ? 'checked' : '' ?> onchange="this.form.submit()">
                     <span class="slider"></span>
                 </label>
                 <span style="margin-left: 1rem;">
-                    <span class="bot-status <?= $autobot_config['ativo'] ? 'bot-ativo' : 'bot-inativo' ?>">
-                        🤖 Bot <?= $autobot_config['ativo'] ? 'ATIVO' : 'INATIVO' ?>
+                    <span class="bot-status <?= $autobot_config['active'] ? 'bot-ativo' : 'bot-inativo' ?>">
+                        🤖 Bot <?= $autobot_config['active'] ? 'ATIVO' : 'INATIVO' ?>
                     </span>
                 </span>
             </form>
@@ -542,22 +472,22 @@ input:checked + .slider:before {
     <!-- Estatísticas -->
     <div class="cards-grid">
         <div class="stats-card">
-            <div class="stats-number"><?= $autobot_config['estatisticas']['mensagens_respondidas'] ?></div>
+            <div class="stats-number"><?= $stats['messages_sent'] ?></div>
             <div>Mensagens Respondidas</div>
             <small class="text-light">Total de mensagens automáticas enviadas pelo bot.</small>
         </div>
         <div class="stats-card">
-            <div class="stats-number"><?= $autobot_config['estatisticas']['conversas_iniciadas'] ?></div>
+            <div class="stats-number"><?= $stats['conversations_started'] ?></div>
             <div>Conversas Iniciadas</div>
             <small class="text-light">Número de novos contatos que iniciaram uma conversa.</small>
         </div>
         <div class="stats-card">
-            <div class="stats-number"><?= $autobot_config['estatisticas']['pessoas_respondidas'] ?></div>
+            <div class="stats-number"><?= $stats['unique_contacts'] ?></div>
             <div>Pessoas Respondidas</div>
             <small class="text-light">Número de contatos únicos que receberam respostas do bot.</small>
         </div>
         <div class="stats-card">
-            <div class="stats-number"><?= $autobot_config['estatisticas']['palavras_ativadas'] ?></div>
+            <div class="stats-number"><?= $stats['active_keywords'] ?></div>
             <div>Palavras-Chave Ativas</div>
             <small class="text-light">Total de palavras-chave atualmente ativas.</small>
         </div>
@@ -574,7 +504,6 @@ input:checked + .slider:before {
             <p><strong>Descrição:</strong> Configure as mensagens automáticas, horário de funcionamento (opcional) e o comportamento do bot. Use variáveis como {{data}}, {{hora}}, {{valor_promocao}}, {{pix}}, {{nome_banco}}, {{nome_titular}}, {{horario_inicio}}, {{horario_fim}} e o emoji selecionado para personalizar as respostas.</p>
             <form method="POST">
                 <input type="hidden" name="action" value="salvar_configuracoes">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                 
                 <div class="form-group">
                     <label class="form-label">Emoji Padrão</label>
@@ -582,7 +511,7 @@ input:checked + .slider:before {
                         <select name="emoji" id="emojiSelector" class="form-select" onchange="updateEmojiPreview()">
                             <option value="">Nenhum</option>
                             <?php foreach ($emojis as $emoji => $desc): ?>
-                            <option value="<?= htmlspecialchars($emoji) ?>" <?= $autobot_config['emoji'] === $emoji ? 'selected' : '' ?>><?= htmlspecialchars($emoji . ' ' . $desc) ?></option>
+                            <option value="<?= htmlspecialchars($emoji) ?>" <?= ($autobot_config['emoji'] ?? '') === $emoji ? 'selected' : '' ?>><?= htmlspecialchars($emoji . ' ' . $desc) ?></option>
                             <?php endforeach; ?>
                         </select>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="copyEmoji()">
@@ -590,33 +519,33 @@ input:checked + .slider:before {
                         </button>
                     </div>
                     <small class="form-text text-muted">Escolha um emoji para usar em todas as mensagens automáticas. Clique em "Copiar Emoji" para usá-lo manualmente.</small>
-                    <div id="emojiPreview" style="margin-top: 0.5rem; font-size: 1.5rem;"><?= htmlspecialchars($autobot_config['emoji'] ?: 'Nenhum emoji selecionado') ?></div>
+                    <div id="emojiPreview" style="margin-top: 0.5rem; font-size: 1.5rem;"><?= htmlspecialchars($autobot_config['emoji'] ?? 'Nenhum emoji selecionado') ?></div>
                 </div>
                 
                 <div class="form-group">
                     <label class="form-label">Mensagem de Saudação</label>
-                    <textarea name="saudacao" class="form-control" rows="5" required><?= htmlspecialchars(preg_replace('/^' . implode('|', array_keys($emojis)) . '\s*/u', '', $autobot_config['saudacao'])) ?></textarea>
+                    <textarea name="saudacao" class="form-control" rows="5" required><?= htmlspecialchars(preg_replace('/^' . preg_quote($autobot_config['emoji'] ?? '', '/') . '\s*/u', '', $autobot_config['greeting_message'] ?? '')) ?></textarea>
                     <small class="form-text text-muted">Enviada quando um usuário inicia uma conversa ou após o tempo de inatividade, dentro do horário de funcionamento (se ativo). O emoji selecionado será adicionado automaticamente.</small>
                 </div>
                 
                 <div class="form-group">
                     <label class="form-label">Mensagem Padrão</label>
-                    <textarea name="mensagem_padrao" class="form-control" rows="5" required><?= htmlspecialchars(preg_replace('/^' . implode('|', array_keys($emojis)) . '\s*/u', '', $autobot_config['mensagem_padrao'])) ?></textarea>
+                    <textarea name="mensagem_padrao" class="form-control" rows="5" required><?= htmlspecialchars(preg_replace('/^' . preg_quote($autobot_config['emoji'] ?? '', '/') . '\s*/u', '', $autobot_config['default_message'] ?? '')) ?></textarea>
                     <small class="form-text text-muted">Enviada quando nenhuma palavra-chave é encontrada, dentro do horário de funcionamento (se ativo). O emoji selecionado será adicionado automaticamente.</small>
                 </div>
                 
                 <div class="form-group">
                     <div class="form-check">
-                        <input type="checkbox" name="horario_ativo" id="horarioAtivo" class="form-check-input" <?= $autobot_config['horario_ativo'] ? 'checked' : '' ?> onchange="toggleHorarioFields()">
+                        <input type="checkbox" name="horario_ativo" id="horarioAtivo" class="form-check-input" <?= $autobot_config['hours_active'] ? 'checked' : '' ?> onchange="toggleHorarioFields()">
                         <label class="form-check-label" for="horarioAtivo">Ativar Horário de Funcionamento</label>
                     </div>
                     <small class="form-text text-muted">Habilite para definir um horário de atendimento. Fora desse horário, a mensagem fora de horário será enviada.</small>
                 </div>
                 
-                <div id="horarioFields" style="display: <?= $autobot_config['horario_ativo'] ? 'block' : 'none' ?>;">
+                <div id="horarioFields" style="display: <?= $autobot_config['hours_active'] ? 'block' : 'none' ?>;">
                     <div class="form-group">
                         <label class="form-label">Mensagem Fora de Horário</label>
-                        <textarea name="mensagem_fora_horario" class="form-control" rows="5"><?= htmlspecialchars(preg_replace('/^' . implode('|', array_keys($emojis)) . '\s*/u', '', $autobot_config['mensagem_fora_horario'])) ?></textarea>
+                        <textarea name="mensagem_fora_horario" class="form-control" rows="5"><?= htmlspecialchars(preg_replace('/^' . preg_quote($autobot_config['emoji'] ?? '', '/') . '\s*/u', '', $autobot_config['out_of_hours_message'] ?? '')) ?></textarea>
                         <small class="form-text text-muted">Enviada quando uma mensagem é recebida fora do horário de funcionamento. Use {{horario_inicio}} e {{horario_fim}}. O emoji selecionado será adicionado automaticamente.</small>
                     </div>
                     
@@ -624,11 +553,11 @@ input:checked + .slider:before {
                         <label class="form-label">Horário de Funcionamento</label>
                         <div style="display: flex; gap: 1rem;">
                             <div style="flex: 1;">
-                                <input type="time" name="horario_inicio" class="form-control" value="<?= htmlspecialchars($autobot_config['horario_inicio']) ?>">
+                                <input type="time" name="horario_inicio" class="form-control" value="<?= htmlspecialchars(substr($autobot_config['start_time'] ?? '08:00:00', 0, 5)) ?>">
                                 <small class="form-text text-muted">Início (ex.: 08:00)</small>
                             </div>
                             <div style="flex: 1;">
-                                <input type="time" name="horario_fim" class="form-control" value="<?= htmlspecialchars($autobot_config['horario_fim']) ?>">
+                                <input type="time" name="horario_fim" class="form-control" value="<?= htmlspecialchars(substr($autobot_config['end_time'] ?? '18:00:00', 0, 5)) ?>">
                                 <small class="form-text text-muted">Fim (ex.: 18:00)</small>
                             </div>
                         </div>
@@ -640,14 +569,26 @@ input:checked + .slider:before {
                     <label class="form-label">Tempo de Inatividade</label>
                     <div style="display: flex; gap: 1rem;">
                         <div style="flex: 1;">
-                            <input type="number" name="tempo_inatividade_valor" class="form-control" value="<?= max(1, floor($autobot_config['tempo_inatividade'] / ($autobot_config['tempo_inatividade'] >= 3600 ? 3600 : ($autobot_config['tempo_inatividade'] >= 60 ? 60 : 1)))) ?>" min="1" required>
+                            <?php
+                            $timeout = $autobot_config['inactivity_timeout'] ?? 300;
+                            $unit = 'segundos';
+                            $value = $timeout;
+                            if ($timeout >= 3600) {
+                                $unit = 'horas';
+                                $value = floor($timeout / 3600);
+                            } elseif ($timeout >= 60) {
+                                $unit = 'minutos';
+                                $value = floor($timeout / 60);
+                            }
+                            ?>
+                            <input type="number" name="tempo_inatividade_valor" class="form-control" value="<?= max(1, $value) ?>" min="1" required>
                             <small class="form-text text-muted">Valor numérico (mínimo: 1).</small>
                         </div>
                         <div style="flex: 1;">
                             <select name="tempo_inatividade_unidade" class="form-select">
-                                <option value="segundos" <?= $autobot_config['tempo_inatividade'] < 60 ? 'selected' : '' ?>>Segundos</option>
-                                <option value="minutos" <?= $autobot_config['tempo_inatividade'] >= 60 && $autobot_config['tempo_inatividade'] < 3600 ? 'selected' : '' ?>>Minutos</option>
-                                <option value="horas" <?= $autobot_config['tempo_inatividade'] >= 3600 ? 'selected' : '' ?>>Horas</option>
+                                <option value="segundos" <?= $unit === 'segundos' ? 'selected' : '' ?>>Segundos</option>
+                                <option value="minutos" <?= $unit === 'minutos' ? 'selected' : '' ?>>Minutos</option>
+                                <option value="horas" <?= $unit === 'horas' ? 'selected' : '' ?>>Horas</option>
                             </select>
                             <small class="form-text text-muted">Unidade de tempo.</small>
                         </div>
@@ -683,15 +624,11 @@ input:checked + .slider:before {
                         <option value="{{pix}}">{{pix}} - Chave Pix (ex.: <?= htmlspecialchars($variaveis['pix'] ?? 'chave-pix@exemplo.com') ?>)</option>
                         <option value="{{nome_banco}}">{{nome_banco}} - Nome do banco (ex.: <?= htmlspecialchars($variaveis['nome_banco'] ?? 'Banco Exemplo') ?>)</option>
                         <option value="{{nome_titular}}">{{nome_titular}} - Nome do titular (ex.: <?= htmlspecialchars($variaveis['nome_titular'] ?? 'João Silva') ?>)</option>
-                        <option value="{{horario_inicio}}">{{horario_inicio}} - Horário de início (ex.: <?= htmlspecialchars($autobot_config['horario_inicio'] ?? '08:00') ?>)</option>
-                        <option value="{{horario_fim}}">{{horario_fim}} - Horário de fim (ex.: <?= htmlspecialchars($autobot_config['horario_fim'] ?? '18:00') ?>)</option>
+                        <option value="{{horario_inicio}}">{{horario_inicio}} - Horário de início (ex.: <?= htmlspecialchars(substr($autobot_config['start_time'] ?? '08:00:00', 0, 5)) ?>)</option>
+                        <option value="{{horario_fim}}">{{horario_fim}} - Horário de fim (ex.: <?= htmlspecialchars(substr($autobot_config['end_time'] ?? '18:00:00', 0, 5)) ?>)</option>
                         <option value="{{nome}}">{{nome}} - Nome do usuário (ex.: João)</option>
                         <option value="{{numero}}">{{numero}} - Número do usuário (ex.: 5599999999999)</option>
                         <option value="{{saudacao}}">{{saudacao}} - Saudação do momento (ex.: Bom dia / Boa tarde / Boa noite)</option>
-                        <option value="{{site}}">{{site}} - Site da empresa (ex.: <?= htmlspecialchars($variaveis['site'] ?? 'https://example.com') ?>)</option>
-                        <option value="{{instagram}}">{{instagram}} - Instagram (ex.: <?= htmlspecialchars($variaveis['instagram'] ?? '@suaempresa') ?>)</option>
-                        <option value="{{whatsapp_grupo}}">{{whatsapp_grupo}} - Link para grupo do WhatsApp (ex.: <?= htmlspecialchars($variaveis['whatsapp_grupo'] ?? 'https://chat.whatsapp.com/xxxx') ?>)</option>
-                        <option value="{{mensagem_aleatoria}}">{{mensagem_aleatoria}} - Frase ou versículo motivacional aleatório</option>
                     </select>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="copyTemplate()">
                         <i class="bi bi-clipboard"></i> Copiar Variável
@@ -714,7 +651,6 @@ input:checked + .slider:before {
             <p><strong>Descrição:</strong> Configure valores para variáveis dinâmicas usadas nas mensagens (ex.: {{valor_promocao}}, {{pix}}, {{nome_banco}}, {{nome_titular}}). Essas variáveis podem ser usadas na saudação, mensagem padrão, mensagem fora de horário e respostas de palavras-chave.</p>
             <form method="POST">
                 <input type="hidden" name="action" value="salvar_variaveis">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                 
                 <div class="form-group">
                     <label class="form-label">Valor da Promoção</label>
@@ -768,18 +704,18 @@ input:checked + .slider:before {
             <?php else: ?>
             <div id="palavras-lista">
                 <?php foreach ($palavras_chave as $palavra): ?>
-                <div class="palavra-item <?= $palavra['ativo'] ? 'palavra-ativa' : 'palavra-inativa' ?>">
+                <div class="palavra-item <?= $palavra['active'] ? 'palavra-ativa' : 'palavra-inativa' ?>">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                         <div style="flex: 1; min-width: 200px;">
-                            <h5 style="margin: 0; color: <?= $palavra['ativo'] ? '#28a745' : '#dc3545' ?>;">
-                                <?= htmlspecialchars($palavra['palavra']) ?>
-                                <?= $palavra['ativo'] ? '✅' : '❌' ?>
+                            <h5 style="margin: 0; color: <?= $palavra['active'] ? '#28a745' : '#dc3545' ?>;">
+                                <?= htmlspecialchars($palavra['keyword']) ?>
+                                <?= $palavra['active'] ? '✅' : '❌' ?>
                             </h5>
                             <p style="margin: 0.5rem 0; color: #666;">
-                                <?= nl2br(htmlspecialchars(substr($palavra['resposta'], 0, 100))) ?><?= strlen($palavra['resposta']) > 100 ? '...' : '' ?>
+                                <?= nl2br(htmlspecialchars(substr($palavra['response'], 0, 100))) ?><?= strlen($palavra['response']) > 100 ? '...' : '' ?>
                             </p>
                             <small class="text-muted">
-                                Usada <?= $palavra['contador'] ?> vezes • Tempo de resposta: <?= $palavra['tempo_resposta'] ?>s • Criada em <?= date('d/m/Y H:i', strtotime($palavra['criado_em'])) ?>
+                                Usada <?= $palavra['usage_count'] ?> vezes • Tempo de resposta: <?= $palavra['response_delay'] ?>s • Criada em <?= date('d/m/Y H:i', strtotime($palavra['created_at'])) ?>
                             </small>
                         </div>
                         <div style="margin-left: 1rem; display: flex; gap: 0.5rem;">
@@ -789,9 +725,8 @@ input:checked + .slider:before {
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="toggle_palavra">
                                 <input type="hidden" name="palavra_id" value="<?= $palavra['id'] ?>">
-                                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                                <button type="submit" class="btn btn-sm <?= $palavra['ativo'] ? 'btn-outline-warning' : 'btn-outline-success' ?>">
-                                    <i class="bi bi-<?= $palavra['ativo'] ? 'pause' : 'play' ?>"></i>
+                                <button type="submit" class="btn btn-sm <?= $palavra['active'] ? 'btn-outline-warning' : 'btn-outline-success' ?>">
+                                    <i class="bi bi-<?= $palavra['active'] ? 'pause' : 'play' ?>"></i>
                                 </button>
                             </form>
                             <button class="btn btn-sm btn-outline-danger" onclick="deletarPalavra(<?= $palavra['id'] ?>)">
@@ -816,7 +751,6 @@ input:checked + .slider:before {
                 <form method="POST" id="formPalavra">
                     <input type="hidden" name="action" value="adicionar_palavra" id="palavraAction">
                     <input type="hidden" name="palavra_id" id="palavraId">
-                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
                     
                     <div class="form-group">
                         <label class="form-label">Palavra ou Frase-Chave</label>
@@ -872,10 +806,18 @@ function editarPalavra(palavra) {
     document.getElementById('modalPalavraTitulo').textContent = 'Editar Palavra-Chave';
     document.getElementById('palavraAction').value = 'editar_palavra';
     document.getElementById('palavraId').value = palavra.id;
-    document.getElementById('palavraCampo').value = palavra.palavra;
-    document.getElementById('respostaCampo').value = palavra.resposta.replace(/^[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u, '').trim();
-    document.getElementById('tempoRespostaCampo').value = palavra.tempo_resposta;
-    document.getElementById('ativoCampo').checked = palavra.ativo;
+    document.getElementById('palavraCampo').value = palavra.keyword;
+    
+    // Remove emoji from response for editing
+    const emoji = '<?= htmlspecialchars($autobot_config['emoji'] ?? '') ?>';
+    let response = palavra.response;
+    if (emoji && response.startsWith(emoji + ' ')) {
+        response = response.substring(emoji.length + 1);
+    }
+    document.getElementById('respostaCampo').value = response;
+    
+    document.getElementById('tempoRespostaCampo').value = palavra.response_delay;
+    document.getElementById('ativoCampo').checked = palavra.active;
     document.getElementById('btnSalvarPalavra').innerHTML = '<i class="bi bi-check"></i> Atualizar';
     document.getElementById('modalPalavra').classList.add('active');
 }
@@ -891,7 +833,6 @@ function deletarPalavra(id) {
         form.innerHTML = `
             <input type="hidden" name="action" value="deletar_palavra">
             <input type="hidden" name="palavra_id" value="${id}">
-            <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
         `;
         document.body.appendChild(form);
         form.submit();

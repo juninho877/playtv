@@ -1,13 +1,19 @@
 <?php
-// Webhook para Evolution API v2 - AutoBot WhatsApp
+/**
+ * Webhook para Evolution API v2 - AutoBot WhatsApp
+ * Migrado para MySQL
+ */
 error_reporting(E_ALL);
-ini_set('display_errors', 0); // Não exibir erros para não quebrar o webhook
+ini_set('display_errors', 0);
 
-// Desativar cache
+// Headers
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Content-Type: application/json");
+
+// Incluir configuração do banco
+require_once __DIR__ . '/includes/config.php';
 
 // --- Funções Auxiliares ---
 function logMessage($message, $type = 'info') {
@@ -16,34 +22,18 @@ function logMessage($message, $type = 'info') {
     file_put_contents($logFile, "{$timestamp} {$message}\n", FILE_APPEND | LOCK_EX);
 }
 
-function getConfig($path) {
-    if (!file_exists($path)) {
-        logMessage("Arquivo de configuração não encontrado: {$path}", 'error');
-        return [];
-    }
-    $content = file_get_contents($path);
-    $decoded = json_decode($content, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        logMessage("Erro ao decodificar JSON em {$path}: " . json_last_error_msg(), 'error');
-        return [];
-    }
-    return is_array($decoded) ? $decoded : [];
-}
-
 function cleanPhoneNumber($number) {
     if (!is_string($number)) {
         logMessage("Número inválido para limpeza: " . var_export($number, true), 'error');
         return '';
     }
-    // Remove tudo que não é dígito ou @
+    
     $cleaned = preg_replace('/[^\d@.]/', '', $number);
     
-    // Se tem @, pega só a parte antes do @
     if (strpos($cleaned, '@') !== false) {
         $cleaned = explode('@', $cleaned)[0];
     }
     
-    // Remove códigos de país duplicados (ex: 5555119999 -> 5511999999)
     if (strlen($cleaned) > 13 && substr($cleaned, 0, 2) === '55') {
         $cleaned = '55' . substr($cleaned, 4);
     }
@@ -52,15 +42,16 @@ function cleanPhoneNumber($number) {
 }
 
 function isWithinOperatingHours($config) {
-    if (!$config['horario_ativo']) {
-        return true; // Horário não ativado, sempre considerado "dentro"
+    if (!$config['hours_active']) {
+        return true;
     }
-    $inicio = DateTime::createFromFormat('H:i', $config['horario_inicio']);
-    $fim = DateTime::createFromFormat('H:i', $config['horario_fim']);
+    
+    $inicio = DateTime::createFromFormat('H:i:s', $config['start_time']);
+    $fim = DateTime::createFromFormat('H:i:s', $config['end_time']);
     $agora = new DateTime();
     
     if (!$inicio || !$fim) {
-        logMessage("Horários inválidos: início={$config['horario_inicio']}, fim={$config['horario_fim']}", 'error');
+        logMessage("Horários inválidos: início={$config['start_time']}, fim={$config['end_time']}", 'error');
         return true;
     }
     
@@ -101,7 +92,7 @@ try {
     // Processar diferentes estruturas da Evolution API v2
     $messageText = '';
     $senderNumber = '';
-    $senderName = 'Cliente'; // Valor padrão se pushName não estiver disponível
+    $senderName = 'Cliente';
     $fromMe = false;
     $isGroup = false;
     
@@ -115,7 +106,6 @@ try {
             $fromMe = $message['key']['fromMe'] ?? false;
             if ($fromMe) continue;
             
-            // Verificar se é mensagem de grupo
             $senderNumber = $message['key']['remoteJid'] ?? '';
             $isGroup = strpos($senderNumber, '@g.us') !== false;
             if ($isGroup) {
@@ -123,7 +113,6 @@ try {
                 continue;
             }
             
-            // Capturar o nome do remetente (pushName)
             $senderName = $message['pushName'] ?? $senderName;
             
             if (isset($message['message']['conversation'])) {
@@ -134,7 +123,7 @@ try {
                 $messageText = $message['message']['imageMessage']['caption'];
             }
             
-            break; // Processar apenas a primeira mensagem válida
+            break;
         }
     }
     // Estrutura: data.message + data.key
@@ -160,7 +149,6 @@ try {
                 exit();
             }
             
-            // Capturar o nome do remetente (pushName)
             $senderName = $data['data']['pushName'] ?? $senderName;
             
             if (isset($message['conversation'])) {
@@ -195,7 +183,6 @@ try {
                 exit();
             }
             
-            // Capturar o nome do remetente (pushName)
             $senderName = $data['pushName'] ?? $senderName;
             
             if (isset($message['conversation'])) {
@@ -226,39 +213,31 @@ try {
     $cleanSenderNumber = cleanPhoneNumber($senderNumber);
     logMessage("Número original: {$senderNumber} | Número limpo: {$cleanSenderNumber} | Nome: {$senderName}");
     
-    // Carregar configurações
-    $config = getConfig('data/config.json');
-    if (empty($config)) {
-        logMessage("Falha ao carregar config.json", 'error');
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => 'Configuração inválida']);
+    // Buscar configurações do AutoBot (assumindo user_id = 1 para simplificar)
+    $autobot_config = fetchOne("SELECT * FROM autobot_config WHERE user_id = 1");
+    if (!$autobot_config) {
+        logMessage("Configuração AutoBot não encontrada", 'error');
+        http_response_code(200);
+        echo json_encode(['status' => 'success', 'message' => 'AutoBot não configurado']);
         exit();
-    }
-    
-    $autobot_config = getConfig('data/autobot_config.json');
-    if (empty($autobot_config)) {
-        logMessage("Falha ao carregar autobot_config.json", 'error');
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => 'Configuração de autobot inválida']);
-        exit();
-    }
-    
-    $variaveis = getConfig('data/variaveis.json');
-    if (empty($variaveis)) {
-        logMessage("Falha ao carregar variaveis.json", 'error');
-        $variaveis = [];
     }
     
     // Verificar se o bot está ativo
-    if (!isset($autobot_config['ativo']) || !$autobot_config['ativo']) {
+    if (!$autobot_config['active']) {
         logMessage("Bot inativo, ignorando mensagem");
         http_response_code(200);
         echo json_encode(['status' => 'success', 'message' => 'Bot inativo']);
         exit();
     }
     
-    // Verificar configuração WhatsApp
-    if (empty($config['whatsapp']['server']) || empty($config['whatsapp']['instance']) || empty($config['whatsapp']['apikey'])) {
+    // Buscar configurações do WhatsApp
+    $whatsapp_config = fetchAll("SELECT config_key, config_value FROM system_config WHERE config_key IN ('whatsapp_server', 'whatsapp_instance', 'whatsapp_apikey')");
+    $config = [];
+    foreach ($whatsapp_config as $setting) {
+        $config[$setting['config_key']] = $setting['config_value'];
+    }
+    
+    if (empty($config['whatsapp_server']) || empty($config['whatsapp_instance']) || empty($config['whatsapp_apikey'])) {
         logMessage("Configuração WhatsApp incompleta", 'error');
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => 'Configuração WhatsApp incompleta']);
@@ -268,65 +247,41 @@ try {
     // Verificar horário de funcionamento
     $withinOperatingHours = isWithinOperatingHours($autobot_config);
     
-    // Carregar histórico de conversas
-    $conversas = getConfig('data/conversas.json');
-    if (!is_array($conversas)) {
-        logMessage("Conversas não é um array: " . var_export($conversas, true), 'error');
-        $conversas = [];
-    }
+    // Buscar ou criar conversa
+    $conversa = fetchOne("SELECT * FROM autobot_conversations WHERE user_id = 1 AND phone_number = ?", [$cleanSenderNumber]);
     
-    // Verificar se é primeira interação ou retorno após inatividade
-    $conversa_existente = false;
-    $ultima_interacao = 0;
     $enviar_saudacao = false;
-    
-    foreach ($conversas as &$conversa) {
-        if (!is_array($conversa)) {
-            logMessage("Conversa inválida no conversas.json: " . var_export($conversa, true), 'error');
-            continue;
-        }
-        if ($conversa['numero'] === $cleanSenderNumber) {
-            $conversa_existente = true;
-            $ultima_interacao = strtotime($conversa['ultima_interacao']);
-            $conversa['ultima_interacao'] = date('Y-m-d H:i:s');
-            $conversa['total_mensagens'] = ($conversa['total_mensagens'] ?? 0) + 1;
-            $conversa['nome'] = $senderName; // Atualizar nome
-            break;
-        }
-    }
-    
     $tempo_atual = time();
     
-    if (!$conversa_existente) {
-        // Nova conversa com número limpo
-        $conversas[] = [
-            'numero' => $cleanSenderNumber,
-            'nome' => $senderName,
-            'primeira_interacao' => date('Y-m-d H:i:s'),
-            'ultima_interacao' => date('Y-m-d H:i:s'),
-            'total_mensagens' => 1,
-            'saudacao_enviada' => true
-        ];
+    if (!$conversa) {
+        // Nova conversa
+        executeQuery("INSERT INTO autobot_conversations (user_id, phone_number, contact_name, first_interaction, last_interaction, total_messages, greeting_sent) VALUES (1, ?, ?, NOW(), NOW(), 1, 1)", 
+            [$cleanSenderNumber, $senderName]);
         $enviar_saudacao = true;
-        $autobot_config['estatisticas']['conversas_iniciadas'] = ($autobot_config['estatisticas']['conversas_iniciadas'] ?? 0) + 1;
+        
+        // Atualizar estatísticas
+        executeQuery("INSERT INTO autobot_statistics (user_id, conversations_started) VALUES (1, 1) ON DUPLICATE KEY UPDATE conversations_started = conversations_started + 1");
+        
         logMessage("Nova conversa iniciada para {$cleanSenderNumber} (Nome: {$senderName})", 'info');
-    } elseif (($tempo_atual - $ultima_interacao) > ($autobot_config['tempo_inatividade'] ?? 3600)) {
-        // Conversa retomada após inatividade
-        $enviar_saudacao = true;
-        logMessage("Conversa retomada após inatividade para {$cleanSenderNumber} (Nome: {$senderName})", 'info');
+    } else {
+        // Conversa existente
+        $ultima_interacao = strtotime($conversa['last_interaction']);
+        
+        if (($tempo_atual - $ultima_interacao) > $autobot_config['inactivity_timeout']) {
+            $enviar_saudacao = true;
+            logMessage("Conversa retomada após inatividade para {$cleanSenderNumber} (Nome: {$senderName})", 'info');
+        }
+        
+        // Atualizar conversa
+        executeQuery("UPDATE autobot_conversations SET contact_name = ?, last_interaction = NOW(), total_messages = total_messages + 1 WHERE id = ?", 
+            [$senderName, $conversa['id']]);
     }
     
-    // Atualizar pessoas respondidas
-    $autobot_config['estatisticas']['pessoas_respondidas'] = count(array_unique(array_column($conversas, 'numero')));
-    
-    // Salvar conversas atualizadas
-    if (is_writable('data/conversas.json')) {
-        file_put_contents('data/conversas.json', json_encode($conversas, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    } else {
-        logMessage("Sem permissão para gravar em data/conversas.json", 'error');
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => 'Erro ao salvar conversas']);
-        exit();
+    // Buscar variáveis dinâmicas
+    $variables_rows = fetchAll("SELECT variable_name, variable_value FROM dynamic_variables WHERE user_id = 1");
+    $variaveis = [];
+    foreach ($variables_rows as $row) {
+        $variaveis[$row['variable_name']] = $row['variable_value'];
     }
     
     $resposta = '';
@@ -339,8 +294,8 @@ try {
         $text = str_replace('{{numero}}', $cleanSenderNumber, $text);
         $text = str_replace('{{data}}', date('d/m/Y'), $text);
         $text = str_replace('{{hora}}', date('H:i'), $text);
-        $text = str_replace('{{horario_inicio}}', $autobot_config['horario_inicio'] ?? '08:00', $text);
-        $text = str_replace('{{horario_fim}}', $autobot_config['horario_fim'] ?? '18:00', $text);
+        $text = str_replace('{{horario_inicio}}', substr($autobot_config['start_time'] ?? '08:00:00', 0, 5), $text);
+        $text = str_replace('{{horario_fim}}', substr($autobot_config['end_time'] ?? '18:00:00', 0, 5), $text);
         foreach ($variaveis as $key => $value) {
             $text = str_replace("{{{$key}}}", $value, $text);
         }
@@ -348,8 +303,8 @@ try {
     };
     
     // Fora do horário de funcionamento
-    if (!$withinOperatingHours && $autobot_config['horario_ativo']) {
-        $resposta = $autobot_config['mensagem_fora_horario'] ?? 'Estamos fora do horário de atendimento. Retornaremos em breve!';
+    if (!$withinOperatingHours && $autobot_config['hours_active']) {
+        $resposta = $autobot_config['out_of_hours_message'] ?? 'Estamos fora do horário de atendimento. Retornaremos em breve!';
         $resposta = $replaceVariables($resposta);
         logMessage("Enviando mensagem fora de horário para {$cleanSenderNumber} (Nome: {$senderName})");
     } 
@@ -357,32 +312,22 @@ try {
     else {
         // Buscar palavra-chave na mensagem (se não for saudação)
         if (!$enviar_saudacao) {
-            $palavras_chave = getConfig('data/palavras_chave.json');
-            if (!is_array($palavras_chave)) {
-                logMessage("Palavras-chave não é um array: " . var_export($palavras_chave, true), 'error');
-                $palavras_chave = [];
-            }
+            $palavras_chave = fetchAll("SELECT * FROM autobot_keywords WHERE user_id = 1 AND active = 1");
             
-            foreach ($palavras_chave as &$palavra) {
-                if (!is_array($palavra)) {
-                    logMessage("Palavra-chave inválida: " . var_export($palavra, true), 'error');
-                    continue;
-                }
-                if (!$palavra['ativo']) continue;
-                
-                // Busca case-insensitive com suporte a múltiplas palavras
-                $keyword_text = $palavra['palavra'] ?? '';
+            foreach ($palavras_chave as $palavra) {
+                $keyword_text = $palavra['keyword'] ?? '';
                 $keywords = array_map('trim', explode(',', $keyword_text));
                 
                 foreach ($keywords as $keyword) {
                     if (stripos($messageText, $keyword) !== false) {
-                        // Substituir variáveis na resposta
-                        $resposta = $palavra['resposta'] ?? '';
+                        $resposta = $palavra['response'] ?? '';
                         $resposta = str_replace('{{palavra}}', $keyword, $resposta);
                         $resposta = $replaceVariables($resposta);
                         
-                        $palavra['contador'] = ($palavra['contador'] ?? 0) + 1;
-                        $tempo_resposta = $palavra['tempo_resposta'] ?? 0;
+                        // Atualizar contador
+                        executeQuery("UPDATE autobot_keywords SET usage_count = usage_count + 1 WHERE id = ?", [$palavra['id']]);
+                        
+                        $tempo_resposta = $palavra['response_delay'] ?? 0;
                         $palavra_encontrada = true;
                         
                         logMessage("Palavra-chave encontrada: '{$keyword}' para {$cleanSenderNumber} (Nome: {$senderName})");
@@ -390,21 +335,15 @@ try {
                     }
                 }
             }
-            
-            // Se encontrou palavra-chave, salvar estatística
-            if ($palavra_encontrada && is_writable('data/palavras_chave.json')) {
-                file_put_contents('data/palavras_chave.json', json_encode($palavras_chave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                $autobot_config['estatisticas']['palavras_ativadas'] = count(array_filter($palavras_chave, fn($p) => $p['ativo']));
-            }
         }
         
         // Definir resposta
         if ($enviar_saudacao) {
-            $resposta = $autobot_config['saudacao'] ?? 'Olá, bem-vindo ao AutoBot!';
+            $resposta = $autobot_config['greeting_message'] ?? 'Olá, bem-vindo ao AutoBot!';
             $resposta = $replaceVariables($resposta);
             logMessage("Enviando saudação para {$cleanSenderNumber} (Nome: {$senderName})");
         } elseif (!$palavra_encontrada) {
-            $resposta = $autobot_config['mensagem_padrao'] ?? 'Não entendi sua mensagem. Como posso ajudar?';
+            $resposta = $autobot_config['default_message'] ?? 'Não entendi sua mensagem. Como posso ajudar?';
             $resposta = $replaceVariables($resposta);
             logMessage("Enviando mensagem padrão para {$cleanSenderNumber} (Nome: {$senderName})");
         }
@@ -413,20 +352,19 @@ try {
     // Enviar resposta
     if (!empty($resposta)) {
         if ($tempo_resposta > 0) {
-            sleep($tempo_resposta); // Atrasar a resposta conforme configurado
+            sleep($tempo_resposta);
         }
         
-        $base_url = rtrim($config['whatsapp']['server'], '/');
-        $url = $base_url . '/message/sendText/' . $config['whatsapp']['instance'];
+        $base_url = rtrim($config['whatsapp_server'], '/');
+        $url = $base_url . '/message/sendText/' . $config['whatsapp_instance'];
         
-        // Payload atualizado para Evolution API v2
         $payload = [
-            'number' => $senderNumber, // Mantido $senderNumber para compatibilidade com a API
+            'number' => $senderNumber,
             'text' => $resposta
         ];
         
         $headers = [
-            'apikey: ' . $config['whatsapp']['apikey'],
+            'apikey: ' . $config['whatsapp_apikey'],
             'Content-Type: application/json'
         ];
         
@@ -448,20 +386,12 @@ try {
             logMessage("Erro cURL: {$curlError}", 'error');
         } elseif ($httpCode === 200 || $httpCode === 201) {
             logMessage("Resposta enviada com sucesso para {$cleanSenderNumber} (Nome: {$senderName}): {$resposta}");
-            $autobot_config['estatisticas']['mensagens_respondidas'] = ($autobot_config['estatisticas']['mensagens_respondidas'] ?? 0) + 1;
+            
+            // Atualizar estatísticas
+            executeQuery("INSERT INTO autobot_statistics (user_id, messages_sent) VALUES (1, 1) ON DUPLICATE KEY UPDATE messages_sent = messages_sent + 1");
         } else {
             logMessage("Erro ao enviar para {$cleanSenderNumber} (Nome: {$senderName}). HTTP: {$httpCode}, Response: {$response}", 'error');
         }
-    }
-    
-    // Salvar estatísticas atualizadas
-    if (is_writable('data/autobot_config.json')) {
-        file_put_contents('data/autobot_config.json', json_encode($autobot_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    } else {
-        logMessage("Sem permissão para gravar em data/autobot_config.json", 'error');
-        http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => 'Erro ao salvar estatísticas']);
-        exit();
     }
     
     logMessage("Processamento concluído para {$cleanSenderNumber} (Nome: {$senderName}) com resposta: {$resposta}");

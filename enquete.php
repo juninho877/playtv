@@ -1,81 +1,96 @@
-
 <?php
 $page_title = 'Criar Enquetes';
 include 'includes/auth.php';
 verificarLogin();
 
-$bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
+$sucesso = '';
+$erro = '';
 
 // Processar envio de enquete
 if ($_POST && isset($_POST['action']) && $_POST['action'] == 'enviar_enquete') {
-    $pergunta = $_POST['pergunta'];
-    $opcoes = array_filter([$_POST['opcao1'], $_POST['opcao2'], $_POST['opcao3'], $_POST['opcao4']]);
-    $bot_id = $_POST['bot_id'];
-    $destino = $_POST['destino'];
-    
-    // Encontrar bot
-    $bot_selecionado = null;
-    foreach ($bots as $bot) {
-        if ($bot['id'] == $bot_id) {
-            $bot_selecionado = $bot;
-            break;
-        }
-    }
-    
-    if ($bot_selecionado && $bot_selecionado['tipo'] == 'telegram') {
-        // Montar enquete para Telegram
-        $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPoll";
+    try {
+        $pergunta = trim($_POST['pergunta'] ?? '');
+        $opcoes = array_filter([
+            trim($_POST['opcao1'] ?? ''),
+            trim($_POST['opcao2'] ?? ''),
+            trim($_POST['opcao3'] ?? ''),
+            trim($_POST['opcao4'] ?? '')
+        ]);
+        $bot_id = (int)($_POST['bot_id'] ?? 0);
+        $destino = trim($_POST['destino'] ?? '');
         
-        $data = [
-            'chat_id' => $destino,
-            'question' => $pergunta,
-            'options' => json_encode($opcoes),
-            'is_anonymous' => false,
-            'allows_multiple_answers' => false
-        ];
-        
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        
-        $response = curl_exec($ch);
-        $response_data = json_decode($response, true);
-        curl_close($ch);
-        
-        if ($response_data['ok'] ?? false) {
-            // Log
-            $logs = json_decode(file_get_contents('data/logs.json'), true) ?: [];
-            $logs[] = [
-                'id' => time(),
-                'data_hora' => date('Y-m-d H:i:s'),
-                'destino' => $destino,
-                'bot' => $bot_selecionado['nome'],
-                'tipo' => 'Enquete',
-                'mensagem' => $pergunta,
-                'status' => 'sucesso'
-            ];
-            file_put_contents('data/logs.json', json_encode($logs, JSON_PRETTY_PRINT));
-            
-            $sucesso = "Enquete enviada com sucesso!";
+        if (empty($pergunta) || count($opcoes) < 2 || empty($destino) || $bot_id <= 0) {
+            $erro = "Todos os campos obrigatórios devem ser preenchidos!";
         } else {
-            $erro = "Erro ao enviar enquete: " . ($response_data['description'] ?? 'Erro desconhecido');
+            // Buscar bot no banco
+            $bot_selecionado = fetchOne("SELECT * FROM bots WHERE id = ? AND active = 1 AND type = 'telegram' AND (user_id = ? OR user_id IS NULL)", 
+                [$bot_id, $_SESSION['user_id']]);
+            
+            if (!$bot_selecionado) {
+                $erro = "Bot não encontrado ou inativo!";
+            } else {
+                // Montar enquete para Telegram
+                $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPoll";
+                
+                $data = [
+                    'chat_id' => $destino,
+                    'question' => $pergunta,
+                    'options' => json_encode($opcoes),
+                    'is_anonymous' => false,
+                    'allows_multiple_answers' => false
+                ];
+                
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                
+                $response = curl_exec($ch);
+                $response_data = json_decode($response, true);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                
+                if ($httpCode == 200 && ($response_data['ok'] ?? false)) {
+                    // Log no banco
+                    executeQuery("INSERT INTO logs (destination, bot_name, type, message, status, platform, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())", 
+                        [$destino, $bot_selecionado['name'], 'Enquete', $pergunta, 'success', 'telegram', $_SESSION['user_id']]);
+                    
+                    $sucesso = "Enquete enviada com sucesso!";
+                } else {
+                    $erro = "Erro ao enviar enquete: " . ($response_data['description'] ?? 'Erro desconhecido');
+                    
+                    // Log do erro
+                    executeQuery("INSERT INTO logs (destination, bot_name, type, message, status, platform, user_id, error_details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())", 
+                        [$destino, $bot_selecionado['name'], 'Enquete', $pergunta, 'error', 'telegram', $_SESSION['user_id'], $erro]);
+                }
+            }
         }
-    } else {
-        $erro = "Enquetes só funcionam com bots do Telegram!";
+    } catch (Exception $e) {
+        error_log("Enquete error: " . $e->getMessage());
+        $erro = "Erro interno. Tente novamente.";
     }
+}
+
+// Carregar bots do Telegram
+try {
+    $bots = fetchAll("SELECT * FROM bots WHERE active = 1 AND type = 'telegram' AND (user_id = ? OR user_id IS NULL) ORDER BY name", [$_SESSION['user_id']]);
+} catch (Exception $e) {
+    error_log("Enquete load error: " . $e->getMessage());
+    $bots = [];
 }
 
 include 'includes/header.php';
 ?>
 
-<?php if (isset($sucesso)): ?>
-<div class="alert alert-success"><?= $sucesso ?></div>
+<?php if (!empty($sucesso)): ?>
+<div class="alert alert-success"><?= htmlspecialchars($sucesso) ?></div>
 <?php endif; ?>
 
-<?php if (isset($erro)): ?>
-<div class="alert alert-error"><?= $erro ?></div>
+<?php if (!empty($erro)): ?>
+<div class="alert alert-danger"><?= htmlspecialchars($erro) ?></div>
 <?php endif; ?>
 
 <div class="card">
@@ -99,13 +114,16 @@ include 'includes/header.php';
                 <select name="bot_id" class="form-select" required>
                     <option value="">Escolha um bot...</option>
                     <?php foreach ($bots as $bot): ?>
-                        <?php if ($bot['ativo'] && $bot['tipo'] == 'telegram'): ?>
-                        <option value="<?= $bot['id'] ?>">
-                            <?= $bot['nome'] ?>
-                        </option>
-                        <?php endif; ?>
+                    <option value="<?= $bot['id'] ?>">
+                        <?= htmlspecialchars($bot['name']) ?>
+                    </option>
                     <?php endforeach; ?>
                 </select>
+                <?php if (empty($bots)): ?>
+                <small class="form-text text-muted text-danger">
+                    <strong>Nenhum bot do Telegram encontrado.</strong> <a href="bots.php">Clique aqui para cadastrar um bot</a>
+                </small>
+                <?php endif; ?>
             </div>
             
             <div class="form-group">

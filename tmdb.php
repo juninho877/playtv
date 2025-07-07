@@ -3,27 +3,25 @@ $page_title = 'TMDB - Filmes e Séries';
 include 'includes/auth.php';
 verificarLogin();
 
-$config = json_decode(file_get_contents('data/config.json'), true) ?: [];
-$tmdb_key = $config['tmdb_key'] ?? '';
+$sucesso = '';
+$erro = '';
+$erro_envio_msg = '';
 
-// Carregar grupos do usuário
-$grupos_file = 'data/grupos.json';
-$grupos = [];
-if (file_exists($grupos_file)) {
-    $grupos = json_decode(file_get_contents($grupos_file), true) ?: [];
-    if (!is_array($grupos)) {
-        $grupos = [];
-    }
+// Carregar configuração TMDB
+try {
+    $tmdb_config = fetchOne("SELECT config_value FROM system_config WHERE config_key = 'tmdb_api_key'");
+    $tmdb_key = $tmdb_config['config_value'] ?? '';
+    
+    // Carregar grupos do usuário
+    $grupos = fetchAll("SELECT * FROM groups WHERE user_id = ? ORDER BY name", [$_SESSION['user_id']]);
+} catch (Exception $e) {
+    error_log("TMDB load error: " . $e->getMessage());
+    $tmdb_key = '';
+    $grupos = [];
 }
-$meus_grupos = array_filter($grupos, function($grupo) {
-    return isset($grupo['user_id']) && $grupo['user_id'] === $_SESSION['user_id'];
-});
 
 $filmes = [];
 $series = [];
-$erro = '';
-$sucesso = '';
-$erro_envio_msg = '';
 
 if (!empty($tmdb_key) && $tmdb_key != 'SUA_CHAVE_TMDB') {
     $url_filmes = "https://api.themoviedb.org/3/trending/movie/week?api_key=" . $tmdb_key . "&language=pt-BR";
@@ -50,208 +48,213 @@ if (!empty($tmdb_key) && $tmdb_key != 'SUA_CHAVE_TMDB') {
 }
 
 if ($_POST && isset($_POST['action']) && $_POST['action'] == 'enviar_tmdb') {
-    $item_id = $_POST['item_id'];
-    $tipo_item = $_POST['tipo_item'];
-    $bot_id = $_POST['bot_id'] ?? '';
-    $destino = $_POST['destino'];
-    $tipo_envio = $_POST['tipo_envio'];
-    $marcar_lancamento_manual = isset($_POST['marcar_lancamento_manual']) && $_POST['marcar_lancamento_manual'] == '1';
-    $tipo_mensagem_selecionada = $_POST['tipo_mensagem'] ?? 'auto';
-    $mensagem_personalizada_texto = $_POST['mensagem_personalizada'] ?? '';
-    
-    $url_detalhes = "https://api.themoviedb.org/3/{$tipo_item}/{$item_id}?api_key={$tmdb_key}&language=pt-BR";
-    $response_detalhes = @file_get_contents($url_detalhes);
-    
-    $mensagem = '';
+    try {
+        $item_id = $_POST['item_id'];
+        $tipo_item = $_POST['tipo_item'];
+        $bot_id = $_POST['bot_id'] ?? '';
+        $destino = $_POST['destino'];
+        $tipo_envio = $_POST['tipo_envio'];
+        $marcar_lancamento_manual = isset($_POST['marcar_lancamento_manual']) && $_POST['marcar_lancamento_manual'] == '1';
+        $tipo_mensagem_selecionada = $_POST['tipo_mensagem'] ?? 'auto';
+        $mensagem_personalizada_texto = $_POST['mensagem_personalizada'] ?? '';
+        
+        $url_detalhes = "https://api.themoviedb.org/3/{$tipo_item}/{$item_id}?api_key={$tmdb_key}&language=pt-BR";
+        $response_detalhes = @file_get_contents($url_detalhes);
+        
+        $mensagem = '';
 
-    if ($response_detalhes) {
-        $item = json_decode($response_detalhes, true);
-        
-        if ($tipo_mensagem_selecionada == 'personalizada') {
-            $mensagem = $mensagem_personalizada_texto;
-            if ($marcar_lancamento_manual && strpos(strtolower($mensagem), 'lançamento já disponível') === false) {
-                $mensagem .= "\n\n🆕 LANÇAMENTO JÁ DISPONÍVEL";
-            }
-        } else {
-            $url_videos = "https://api.themoviedb.org/3/{$tipo_item}/{$item_id}/videos?api_key={$tmdb_key}";
-            $response_videos = @file_get_contents($url_videos);
-            $trailer_url = '';
+        if ($response_detalhes) {
+            $item = json_decode($response_detalhes, true);
             
-            if ($response_videos) {
-                $videos = json_decode($response_videos, true);
-                foreach ($videos['results'] ?? [] as $video) {
-                    if ($video['type'] == 'Trailer' && $video['site'] == 'YouTube') {
-                        $trailer_url = "https://www.youtube.com/watch?v=" . $video['key'];
-                        break;
-                    }
+            if ($tipo_mensagem_selecionada == 'personalizada') {
+                $mensagem = $mensagem_personalizada_texto;
+                if ($marcar_lancamento_manual && strpos(strtolower($mensagem), 'lançamento já disponível') === false) {
+                    $mensagem .= "\n\n🆕 LANÇAMENTO JÁ DISPONÍVEL";
                 }
-            }
-            
-            $titulo = $item['title'] ?? $item['name'];
-            $sinopse = $item['overview'] ?? 'Sinopse não disponível';
-            $avaliacao = number_format($item['vote_average'], 1);
-            $data_lancamento = $item['release_date'] ?? $item['first_air_date'];
-            $generos = implode(', ', array_column($item['genres'] ?? [], 'name'));
-            
-            $estrelas_num = round($avaliacao / 2);
-            $estrelas = str_repeat('⭐', $estrelas_num);
-            
-            $eh_lancamento_automatico = false;
-            if ($data_lancamento) {
-                $dias_desde_lancamento = (time() - strtotime($data_lancamento)) / (60 * 60 * 24);
-                $eh_lancamento_automatico = $dias_desde_lancamento <= 10;
-            }
-
-            $eh_lancamento_final = $marcar_lancamento_manual || $eh_lancamento_automatico;
-            
-            $icone = $tipo_item == 'movie' ? '🎬' : '📺';
-            $tipo_nome = $tipo_item == 'movie' ? 'Filme' : 'Série';
-            
-            $mensagem = "{$icone} {$titulo}";
-            if ($eh_lancamento_final) {
-                $mensagem .= "\n\n🆕 LANÇAMENTO JÁ DISPONÍVEL";
-            }
-            $mensagem .= "\n\n📝 Sinopse:\n{$sinopse}\n\n";
-            $mensagem .= "⭐ Avaliação: {$avaliacao}/10 {$estrelas}\n\n";
-            $mensagem .= "🎭 Gêneros: {$generos}\n\n";
-            if ($data_lancamento) {
-                $mensagem .= "📅 Lançamento: " . date('d/m/Y', strtotime($data_lancamento)) . "\n\n";
-            }
-            if ($trailer_url) {
-                $mensagem .= "🎥 Trailer: {$trailer_url}\n\n";
-            }
-            $mensagem .= "🤖 Sugestão automática via BotSystem";
-        }
-        
-        $bot_selecionado = null;
-        if ($tipo_envio == 'whatsapp') {
-            if (isset($config['whatsapp']['server']) && isset($config['whatsapp']['instance']) && isset($config['whatsapp']['apikey'])) {
-                $bot_selecionado = [
-                    'tipo' => 'whatsapp',
-                    'nome' => 'WhatsApp Configurado',
-                    'ativo' => true
-                ];
-            }
-        } else {
-            $bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
-            foreach ($bots as $bot) {
-                if ($bot['id'] == $bot_id && $bot['ativo']) {
-                    $bot_selecionado = $bot;
-                    break;
-                }
-            }
-        }
-        
-        if ($bot_selecionado) {
-            $sucesso_envio = false;
-            $erro_envio = '';
-            
-            if (!empty($item['poster_path'])) {
-                $poster_url = "https://image.tmdb.org/t/p/w500" . $item['poster_path'];
             } else {
-                $poster_url = null;
-            }
-
-            if ($bot_selecionado['tipo'] == 'whatsapp') {
-                $base_url = rtrim($config['whatsapp']['server'], '/');
-                $url = $base_url . '/message/sendMedia/' . $config['whatsapp']['instance'];
-
-                $data = [
-                    'number' => $destino,
-                    'media' => $poster_url,
-                    'caption' => $mensagem,
-                    'mediatype' => 'image'
-                ];
+                $url_videos = "https://api.themoviedb.org/3/{$tipo_item}/{$item_id}/videos?api_key={$tmdb_key}";
+                $response_videos = @file_get_contents($url_videos);
+                $trailer_url = '';
                 
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                    'Content-Type: application/json',
-                    'apikey: ' . $config['whatsapp']['apikey']
-                ]);
-                
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                $curl_error = curl_error($ch);
-                curl_close($ch);
-                
-                if ($curl_error) {
-                    $erro_envio = "Erro cURL: " . $curl_error;
-                } elseif ($httpCode >= 200 && $httpCode < 300) {
-                    $response_data = json_decode($response, true);
-                    if (isset($response_data['key']) || isset($response_data['status']) || $httpCode == 200) {
-                        $sucesso_envio = true;
-                    } else {
-                        $erro_envio = "Resposta WhatsApp inválida: " . $response;
+                if ($response_videos) {
+                    $videos = json_decode($response_videos, true);
+                    foreach ($videos['results'] ?? [] as $video) {
+                        if ($video['type'] == 'Trailer' && $video['site'] == 'YouTube') {
+                            $trailer_url = "https://www.youtube.com/watch?v=" . $video['key'];
+                            break;
+                        }
                     }
-                } else {
-                    $erro_envio = "Erro WhatsApp HTTP $httpCode: " . $response;
                 }
                 
-            } elseif ($bot_selecionado['tipo'] == 'telegram') {
-                $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPhoto";
+                $titulo = $item['title'] ?? $item['name'];
+                $sinopse = $item['overview'] ?? 'Sinopse não disponível';
+                $avaliacao = number_format($item['vote_average'], 1);
+                $data_lancamento = $item['release_date'] ?? $item['first_air_date'];
+                $generos = implode(', ', array_column($item['genres'] ?? [], 'name'));
                 
-                $data = [
-                    'chat_id' => $destino,
-                    'photo' => $poster_url,
-                    'caption' => $mensagem,
-                    'parse_mode' => 'HTML'
-                ];
+                $estrelas_num = round($avaliacao / 2);
+                $estrelas = str_repeat('⭐', $estrelas_num);
                 
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                $curl_error = curl_error($ch);
-                curl_close($ch);
-                
-                if ($curl_error) {
-                    $erro_envio = "Erro cURL: " . $curl_error;
-                } elseif ($httpCode == 200) {
-                    $response_data = json_decode($response, true);
-                    if (isset($response_data['ok']) && $response_data['ok'] === true) {
-                        $sucesso_envio = true;
-                    } else {
-                        $erro_envio = "Erro Telegram: " . ($response_data['description'] ?? 'Erro desconhecido');
-                    }
-                } else {
-                    $erro_envio = "Erro HTTP Telegram $httpCode: " . $response;
+                $eh_lancamento_automatico = false;
+                if ($data_lancamento) {
+                    $dias_desde_lancamento = (time() - strtotime($data_lancamento)) / (60 * 60 * 24);
+                    $eh_lancamento_automatico = $dias_desde_lancamento <= 10;
                 }
+
+                $eh_lancamento_final = $marcar_lancamento_manual || $eh_lancamento_automatico;
+                
+                $icone = $tipo_item == 'movie' ? '🎬' : '📺';
+                $tipo_nome = $tipo_item == 'movie' ? 'Filme' : 'Série';
+                
+                $mensagem = "{$icone} {$titulo}";
+                if ($eh_lancamento_final) {
+                    $mensagem .= "\n\n🆕 LANÇAMENTO JÁ DISPONÍVEL";
+                }
+                $mensagem .= "\n\n📝 Sinopse:\n{$sinopse}\n\n";
+                $mensagem .= "⭐ Avaliação: {$avaliacao}/10 {$estrelas}\n\n";
+                $mensagem .= "🎭 Gêneros: {$generos}\n\n";
+                if ($data_lancamento) {
+                    $mensagem .= "📅 Lançamento: " . date('d/m/Y', strtotime($data_lancamento)) . "\n\n";
+                }
+                if ($trailer_url) {
+                    $mensagem .= "🎥 Trailer: {$trailer_url}\n\n";
+                }
+                $mensagem .= "🤖 Sugestão automática via BotSystem";
             }
             
-            $logs = json_decode(file_get_contents('data/logs.json'), true) ?: [];
-            $logs[] = [
-                'id' => time(),
-                'data_hora' => date('Y-m-d H:i:s'),
-                'destino' => $destino,
-                'bot' => $bot_selecionado['nome'],
-                'tipo' => "TMDB - {$tipo_nome}",
-                'mensagem' => $titulo,
-                'status' => $sucesso_envio ? 'sucesso' : 'erro'
-            ];
-            file_put_contents('data/logs.json', json_encode($logs, JSON_PRETTY_PRINT));
+            $bot_selecionado = null;
+            $bot_name = '';
             
-            if ($sucesso_envio) {
-                $sucesso = "Conteúdo TMDB enviado com sucesso!";
+            if ($tipo_envio == 'whatsapp') {
+                $whatsapp_config = fetchAll("SELECT config_key, config_value FROM system_config WHERE config_key IN ('whatsapp_server', 'whatsapp_instance', 'whatsapp_apikey')");
+                $config = [];
+                foreach ($whatsapp_config as $setting) {
+                    $config[$setting['config_key']] = $setting['config_value'];
+                }
+                
+                if (isset($config['whatsapp_server']) && isset($config['whatsapp_instance']) && isset($config['whatsapp_apikey'])) {
+                    $bot_selecionado = [
+                        'type' => 'whatsapp',
+                        'name' => 'WhatsApp Configurado',
+                        'active' => true
+                    ];
+                    $bot_name = 'WhatsApp Configurado';
+                }
             } else {
-                $erro_envio_msg = $erro_envio ?: "Erro desconhecido ao enviar conteúdo TMDB.";
+                $bot_selecionado = fetchOne("SELECT * FROM bots WHERE id = ? AND active = 1 AND (user_id = ? OR user_id IS NULL)", 
+                    [$bot_id, $_SESSION['user_id']]);
+                if ($bot_selecionado) {
+                    $bot_name = $bot_selecionado['name'];
+                }
+            }
+            
+            if ($bot_selecionado) {
+                $sucesso_envio = false;
+                $erro_envio = '';
+                
+                if (!empty($item['poster_path'])) {
+                    $poster_url = "https://image.tmdb.org/t/p/w500" . $item['poster_path'];
+                } else {
+                    $poster_url = null;
+                }
+
+                if ($bot_selecionado['type'] == 'whatsapp') {
+                    $base_url = rtrim($config['whatsapp_server'], '/');
+                    $url = $base_url . '/message/sendMedia/' . $config['whatsapp_instance'];
+
+                    $data = [
+                        'number' => $destino,
+                        'media' => $poster_url,
+                        'caption' => $mensagem,
+                        'mediatype' => 'image'
+                    ];
+                    
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $url);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                        'Content-Type: application/json',
+                        'apikey: ' . $config['whatsapp_apikey']
+                    ]);
+                    
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curl_error = curl_error($ch);
+                    curl_close($ch);
+                    
+                    if ($curl_error) {
+                        $erro_envio = "Erro cURL: " . $curl_error;
+                    } elseif ($httpCode >= 200 && $httpCode < 300) {
+                        $response_data = json_decode($response, true);
+                        if (isset($response_data['key']) || isset($response_data['status']) || $httpCode == 200) {
+                            $sucesso_envio = true;
+                        } else {
+                            $erro_envio = "Resposta WhatsApp inválida: " . $response;
+                        }
+                    } else {
+                        $erro_envio = "Erro WhatsApp HTTP $httpCode: " . $response;
+                    }
+                    
+                } elseif ($bot_selecionado['type'] == 'telegram') {
+                    $url = "https://api.telegram.org/bot" . $bot_selecionado['token'] . "/sendPhoto";
+                    
+                    $data = [
+                        'chat_id' => $destino,
+                        'photo' => $poster_url,
+                        'caption' => $mensagem,
+                        'parse_mode' => 'HTML'
+                    ];
+                    
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $url);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curl_error = curl_error($ch);
+                    curl_close($ch);
+                    
+                    if ($curl_error) {
+                        $erro_envio = "Erro cURL: " . $curl_error;
+                    } elseif ($httpCode == 200) {
+                        $response_data = json_decode($response, true);
+                        if (isset($response_data['ok']) && $response_data['ok'] === true) {
+                            $sucesso_envio = true;
+                        } else {
+                            $erro_envio = "Erro Telegram: " . ($response_data['description'] ?? 'Erro desconhecido');
+                        }
+                    } else {
+                        $erro_envio = "Erro HTTP Telegram $httpCode: " . $response;
+                    }
+                }
+                
+                // Salvar log no banco
+                $tipo_nome = $tipo_item == 'movie' ? 'Filme' : 'Série';
+                executeQuery("INSERT INTO logs (destination, bot_name, type, message, status, platform, user_id, error_details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())", 
+                    [$destino, $bot_name, "TMDB - {$tipo_nome}", $titulo, $sucesso_envio ? 'success' : 'error', $tipo_envio, $_SESSION['user_id'], $erro_envio ?: null]);
+                
+                if ($sucesso_envio) {
+                    $sucesso = "Conteúdo TMDB enviado com sucesso!";
+                } else {
+                    $erro_envio_msg = $erro_envio ?: "Erro desconhecido ao enviar conteúdo TMDB.";
+                }
+            } else {
+                $erro_envio_msg = "Nenhum bot ativo encontrado para o envio.";
             }
         } else {
-            $erro_envio_msg = "Nenhum bot ativo encontrado para o envio.";
+            $erro_envio_msg = "Erro ao buscar detalhes do item no TMDB.";
         }
-    } else {
-        $erro_envio_msg = "Erro ao buscar detalhes do item no TMDB.";
+    } catch (Exception $e) {
+        error_log("TMDB send error: " . $e->getMessage());
+        $erro_envio_msg = "Erro interno. Tente novamente.";
     }
 }
 
@@ -556,14 +559,16 @@ if (!empty($erro)) {
                 <select name="bot_id" class="form-select" id="bot_id">
                     <option value="">Escolha um bot...</option>
                     <?php 
-                    $bots = json_decode(file_get_contents('data/bots.json'), true) ?: [];
-                    foreach ($bots as $bot): 
-                        if ($bot['ativo'] && $bot['tipo'] == 'telegram'):
+                    try {
+                        $bots = fetchAll("SELECT * FROM bots WHERE active = 1 AND type = 'telegram' AND (user_id = ? OR user_id IS NULL)", [$_SESSION['user_id']]);
+                        foreach ($bots as $bot): 
                     ?>
-                    <option value="<?= $bot['id'] ?>"><?= $bot['nome'] ?> (Telegram)</option>
+                    <option value="<?= $bot['id'] ?>"><?= htmlspecialchars($bot['name']) ?> (Telegram)</option>
                     <?php 
-                        endif;
-                    endforeach; 
+                        endforeach;
+                    } catch (Exception $e) {
+                        // Silently handle error
+                    }
                     ?>
                 </select>
             </div>
@@ -572,9 +577,9 @@ if (!empty($erro)) {
                 <label class="form-label">Destino</label>
                 <select name="destino" class="form-select" id="destinoSelect" required>
                     <option value="">Selecione um grupo...</option>
-                    <?php foreach ($meus_grupos as $grupo): ?>
-                    <option value="<?= htmlspecialchars($grupo['id_externo']) ?>" data-tipo="<?= $grupo['tipo'] ?>">
-                        <?= htmlspecialchars($grupo['nome']) ?> (<?= ucfirst($grupo['tipo']) ?>: <?= htmlspecialchars($grupo['id_externo']) ?>)
+                    <?php foreach ($grupos as $grupo): ?>
+                    <option value="<?= htmlspecialchars($grupo['external_id']) ?>" data-tipo="<?= $grupo['type'] ?>">
+                        <?= htmlspecialchars($grupo['name']) ?> (<?= ucfirst($grupo['type']) ?>: <?= htmlspecialchars($grupo['external_id']) ?>)
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -849,3 +854,5 @@ $(document).ready(function() {
     });
 });
 </script>
+
+<?php include 'includes/footer.php'; ?>
